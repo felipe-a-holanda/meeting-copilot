@@ -119,6 +119,6 @@ PROMPT_MAP: dict[str, str] = {
     "summary": PROGRESSIVE_SUMMARY,
     "action_items": ACTION_ITEMS,
     "contradictions": CONTRADICTION_DETECTION,
-    "reply_suggestion": REPLY_SUGGESTION,
-    "custom_prompt": CUSTOM_PROMPT_TEMPLATE,
+    "reply": REPLY_SUGGESTION,
+    "custom": CUSTOM_PROMPT_TEMPLATE,
 }

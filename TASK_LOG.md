@@ -92,12 +92,14 @@
 > Done: Created prompts.py with all 5 prompt templates matching ARCHITECTURE.md exactly, using double-brace escaping for JSON format strings. Added PROMPT_MAP dict mapping task names to templates for dispatcher lookup. All templates verified to format correctly with their expected variables. 81 existing tests still pass.
 
 ### 3.2 LLM Dispatcher
-- [ ] Create `backend/reasoning/dispatcher.py` — LLMDispatcher class with:
+- [x] Create `backend/reasoning/dispatcher.py` — LLMDispatcher class with:
   - `_call_ollama()` — async HTTP call to Ollama API
   - `_call_claude()` — async call via Anthropic SDK
   - `run()` — routes task to appropriate backend based on task type and config
   - Proper error handling: timeout, connection refused, model not found
-- [ ] Write tests: `tests/test_dispatcher.py` — mock HTTP responses, verify routing logic
+- [x] Write tests: `tests/test_dispatcher.py` — mock HTTP responses, verify routing logic
+
+> Done: LLMDispatcher routes tasks to Ollama (light model for summary/action_items, heavy model for contradictions/reply/custom) with Claude API fallback. Heavy tasks try API first when enabled; light tasks fall back to API if Ollama fails. Anthropic SDK imported lazily (handles missing module). Fixed PROMPT_MAP keys to use "reply"/"custom" matching context_manager expectations. 24 tests pass covering routing, fallback chains, HTTP calls, prompt formatting, and init edge cases. 105 total tests pass.
 
 ### 3.3 Reasoning Workers
 - [ ] Create `backend/reasoning/workers/__init__.py`
