@@ -77,8 +77,10 @@
 > Done: MeetingState dataclass tracks segments, speakers, summary, action items, recent_window (deque), and trigger counters. ContextManager fires background tasks (_fire_task) at configurable thresholds: summary every N segments, action scan every M segments. handle_custom_prompt() and handle_reply_request() dispatch on demand. 25 tests pass covering state accumulation, trigger firing/not-firing at boundaries, dispatcher calls, broadcast payloads, and custom/reply handlers.
 
 ### 2.3 Frontend — Speaker Labels
-- [ ] Update `TranscriptPanel.tsx` — show speaker name with distinct color per speaker
-- [ ] Create color mapping utility: assign consistent colors to speaker IDs
+- [x] Update `TranscriptPanel.tsx` — show speaker name with distinct color per speaker
+- [x] Create color mapping utility: assign consistent colors to speaker IDs
+
+> Done: Created `frontend/src/utils/speakerColors.ts` with a 12-color palette and a Map-based assignment that gives each unique speaker a consistent color. Updated `TranscriptPanel.tsx` to import `getSpeakerColor()` and apply it via inline style instead of the hardcoded `text-blue-400` class. `npm run build` compiles cleanly.
 
 ---
 

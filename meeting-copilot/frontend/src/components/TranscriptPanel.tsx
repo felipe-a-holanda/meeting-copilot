@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { TranscriptSegment } from '../types/messages';
+import { getSpeakerColor } from '../utils/speakerColors';
 
 interface TranscriptPanelProps {
   segments: TranscriptSegment[];
@@ -31,7 +32,7 @@ export function TranscriptPanel({ segments }: TranscriptPanelProps) {
                 {formatTime(seg.timestamp_start)}
               </span>
               <div>
-                <span className="font-medium text-blue-400">{seg.speaker}</span>
+                <span className="font-medium" style={{ color: getSpeakerColor(seg.speaker) }}>{seg.speaker}</span>
                 {seg.is_partial && (
                   <span className="ml-2 text-xs text-gray-500 italic">(partial)</span>
                 )}
