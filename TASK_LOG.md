@@ -87,7 +87,9 @@
 ## Phase 3 — LLM Reasoning
 
 ### 3.1 Prompt Templates
-- [ ] Create `backend/reasoning/prompts.py` — all prompt templates from ARCHITECTURE.md (PROGRESSIVE_SUMMARY, ACTION_ITEMS, CONTRADICTION_DETECTION, REPLY_SUGGESTION, CUSTOM_PROMPT_TEMPLATE)
+- [x] Create `backend/reasoning/prompts.py` — all prompt templates from ARCHITECTURE.md (PROGRESSIVE_SUMMARY, ACTION_ITEMS, CONTRADICTION_DETECTION, REPLY_SUGGESTION, CUSTOM_PROMPT_TEMPLATE)
+
+> Done: Created prompts.py with all 5 prompt templates matching ARCHITECTURE.md exactly, using double-brace escaping for JSON format strings. Added PROMPT_MAP dict mapping task names to templates for dispatcher lookup. All templates verified to format correctly with their expected variables. 81 existing tests still pass.
 
 ### 3.2 LLM Dispatcher
 - [ ] Create `backend/reasoning/dispatcher.py` — LLMDispatcher class with:
