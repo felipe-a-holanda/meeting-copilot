@@ -31,12 +31,14 @@
 > Done: Created backend/main.py with FastAPI app, CORS middleware (allow_origins=["*"]), /health returning {"status":"ok"}, /ws/audio receiving raw PCM bytes, /ws/control parsing RequestReplySuggestion and CustomPromptRequest messages. Server starts cleanly with uvicorn and health check confirmed via curl.
 
 ### 1.4 Audio Pipeline — Transcription
-- [ ] Create `backend/audio/__init__.py`
-- [ ] Create `backend/audio/transcriber.py` — wrapper around faster-whisper that accepts PCM audio chunks and yields text segments with timestamps
-- [ ] Create `backend/audio/vad.py` — Silero VAD wrapper that detects speech segments in audio chunks
-- [ ] Create `backend/audio/pipeline.py` — AudioPipeline class that combines VAD + transcriber, accepts raw audio bytes, emits TranscriptSegment events via callback
-- [ ] Write tests: `tests/test_transcriber.py` — feed a synthetic audio chunk (generate a sine wave with numpy), verify it processes without crashing (output text content doesn't matter for synthetic audio)
-- [ ] Integration test: WebSocket audio endpoint receives bytes and the pipeline processes them
+- [x] Create `backend/audio/__init__.py`
+- [x] Create `backend/audio/transcriber.py` — wrapper around faster-whisper that accepts PCM audio chunks and yields text segments with timestamps
+- [x] Create `backend/audio/vad.py` — Silero VAD wrapper that detects speech segments in audio chunks
+- [x] Create `backend/audio/pipeline.py` — AudioPipeline class that combines VAD + transcriber, accepts raw audio bytes, emits TranscriptSegment events via callback
+- [x] Write tests: `tests/test_transcriber.py` — feed a synthetic audio chunk (generate a sine wave with numpy), verify it processes without crashing (output text content doesn't matter for synthetic audio)
+- [x] Integration test: WebSocket audio endpoint receives bytes and the pipeline processes them
+
+> Done: WhisperTranscriber wraps faster-whisper with lazy model loading (import on first use). SileroVAD wraps torch.hub silero-vad with lazy load and fallback if torch unavailable. AudioPipeline accumulates int16 PCM bytes until MIN_CHUNK_SAMPLES (1s), gates on VAD, transcribes, emits TranscriptSegment via async callback. main.py wired up with audio_pipeline instance that receives bytes from /ws/audio. 17 new tests pass (all mocked — no model downloads needed); 42 total pass.
 
 ### 1.5 Frontend — Audio Capture
 - [ ] Initialize React app: `npx create-react-app frontend --template typescript`

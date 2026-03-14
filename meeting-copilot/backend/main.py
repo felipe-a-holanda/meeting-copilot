@@ -4,6 +4,7 @@ import logging
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.audio.pipeline import AudioPipeline
 from backend.config import Settings
 from backend.ws.gateway import ConnectionManager
 from backend.ws.protocol import CustomPromptRequest, RequestReplySuggestion
@@ -23,6 +24,7 @@ app.add_middleware(
 
 audio_manager = ConnectionManager()
 control_manager = ConnectionManager()
+audio_pipeline = AudioPipeline(settings)
 
 
 @app.get("/health")
@@ -38,8 +40,8 @@ async def ws_audio(websocket: WebSocket) -> None:
     try:
         while True:
             data = await websocket.receive_bytes()
-            # Audio bytes will be forwarded to the audio pipeline in task 1.4
             logger.debug("Received %d audio bytes", len(data))
+            await audio_pipeline.process_audio_chunk(data)
     except WebSocketDisconnect:
         logger.info("Audio WebSocket disconnected")
     finally:
