@@ -104,6 +104,14 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
 
     ELAPSED=$(( SECONDS - ITER_START ))
 
+    # Check if Claude hit a rate limit
+    if tail -20 "$LOG_FILE" 2>/dev/null | grep -qi "you've hit your limit"; then
+        echo ""
+        echo "🛑 RATE LIMIT HIT — Claude says usage limit reached. Stopping."
+        echo "   Check the message in $LOG_FILE for reset time."
+        break
+    fi
+
     if [ "$EXIT_CODE" -eq 124 ]; then
         echo ""
         echo "⚠️  TIMEOUT after ${ELAPSED}s — Claude was killed. Check $LOG_FILE for last output."
