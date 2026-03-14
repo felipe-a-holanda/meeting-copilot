@@ -121,11 +121,12 @@
   > Added 6 new fields to `Settings` in `config.py` under a new "Audio Capture" section. Updated `.env.example` with documented `AUDIO_CAPTURE_MODE`, `RECORDINGS_DIR`, `MIC_VOLUME`, `DEFAULT_MIC_SOURCE`, `DEFAULT_MONITOR_SOURCE`, `SAVE_RECORDINGS`. Created `tests/test_config_settings.py` with 17 tests (defaults + env overrides + existing fields unchanged). 270 tests pass, 1 pre-existing failure unchanged.
 
 ### 2.2 Device Discovery Endpoint
-- [ ] Add `GET /api/audio/devices` endpoint to `main.py`:
+- [x] Add `GET /api/audio/devices` endpoint to `main.py`:
   - Calls `AudioRecorder.list_devices()` and `AudioRecorder.get_defaults()`
   - Returns JSON with sources, sinks, and defaults
   - Returns 503 if pactl is not available (with clear error message)
-- [ ] Write tests: mock AudioRecorder.list_devices, verify endpoint response shape
+- [x] Write tests: mock AudioRecorder.list_devices, verify endpoint response shape
+  > Added `GET /api/audio/devices` to `main.py`. Instantiated `audio_recorder = AudioRecorder(pipeline=audio_pipeline, recordings_dir=settings.recordings_dir)` at module level. Endpoint checks `check_dependencies()` for 503 when pactl is missing, and catches `RuntimeError` from `list_devices()` for 503. Created `tests/test_devices_endpoint.py` with 9 tests (success path: 200 + response shape, empty list; error paths: pactl missing, list_devices raises). All 9 tests pass.
 
 ### 2.3 Recording Control Endpoints
 - [ ] Instantiate `AudioRecorder` in `main.py` (wired to the existing `audio_pipeline`)

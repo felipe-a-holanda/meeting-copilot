@@ -12,6 +12,7 @@ from pathlib import Path
 
 from backend.audio.pipeline import AudioPipeline
 from backend.audio.file_processor import FileAudioProcessor
+from backend.audio.recorder import AudioRecorder
 from backend.config import Settings
 from backend.reasoning.context_manager import ContextManager
 from backend.reasoning.dispatcher import LLMDispatcher
@@ -37,6 +38,7 @@ control_manager = ConnectionManager()
 audio_pipeline = AudioPipeline(settings)
 session_store = SessionStore(db_path=settings.db_path)
 file_processor = FileAudioProcessor(settings, session_store)
+audio_recorder = AudioRecorder(pipeline=audio_pipeline, recordings_dir=settings.recordings_dir)
 
 
 @app.on_event("startup")
@@ -112,6 +114,41 @@ async def update_settings(body: SettingsUpdate) -> dict:
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/api/audio/devices")
+async def get_audio_devices() -> dict:
+    """Return available PulseAudio sources and sinks with defaults.
+
+    Returns 503 if pactl is not installed or not accessible.
+    """
+    dep_status = await AudioRecorder.check_dependencies()
+    if not dep_status.pactl_available:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "pactl not available",
+                "message": dep_status.errors[0] if dep_status.errors else "pactl is not installed",
+            },
+        )
+
+    try:
+        device_list = await audio_recorder.list_devices()
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "device_discovery_failed", "message": str(exc)},
+        )
+
+    return {
+        "sources": [{"name": d.name, "description": d.description} for d in device_list.sources],
+        "sinks": [{"name": d.name, "description": d.description} for d in device_list.sinks],
+        "defaults": {
+            "source": device_list.defaults.source,
+            "sink": device_list.defaults.sink,
+            "monitor": device_list.defaults.monitor,
+        },
+    }
 
 
 @app.get("/debug")
