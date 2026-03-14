@@ -72,16 +72,17 @@
   > Removed diarizer import, `self._diarizer` field, and `set_diarization_enabled()` from `pipeline.py`. Added `speaker_label: str = "Speaker"` to `process_audio_chunk()`, `reset()`, and `_process_buffer()` — label passes straight through to each `TranscriptSegment`. Replaced `TestAudioPipelineDiarization` in `test_diarizer.py` with `TestAudioPipelineSpeakerLabel` (6 tests: default label, "Me", "Them", no diarizer attribute, multi-segment, no method). All 244 passing tests still pass; 3 pre-existing failures unchanged.
 
 ### 1B.2 Refactor AudioRecorder — Two Separate ffmpeg Processes
-- [ ] Replace the single `amix` ffmpeg command with two separate ffmpeg processes:
+- [x] Replace the single `amix` ffmpeg command with two separate ffmpeg processes:
   - Mic process: `-f pulse -i <mic_source> -ar 16000 -ac 1 -f s16le pipe:1`
   - Monitor process: `-f pulse -i <monitor_source> -ar 16000 -ac 1 -f s16le pipe:1`
-- [ ] Add separate state fields: `_mic_process`, `_monitor_process`, `_mic_reader_task`, `_monitor_reader_task`
-- [ ] Mic reader loop calls `pipeline.process_audio_chunk(chunk, speaker_label="Me")`
-- [ ] Monitor reader loop calls `pipeline.process_audio_chunk(chunk, speaker_label="Them")`
-- [ ] If no monitor source is available, start mic-only — all chunks get `speaker_label="Me"`
-- [ ] Update `stop()` to shut down both processes and cancel both reader tasks
-- [ ] Remove `_build_ffmpeg_cmd` (the amix version) — keep `_build_ffmpeg_cmd_mic_only` as the template for both streams, renamed to `_build_stream_cmd`
-- [ ] Write tests: verify two ffmpeg processes are started, each with correct source. Verify mic chunks get "Me" and monitor chunks get "Them". Verify stop() shuts down both.
+- [x] Add separate state fields: `_mic_process`, `_monitor_process`, `_mic_reader_task`, `_monitor_reader_task`
+- [x] Mic reader loop calls `pipeline.process_audio_chunk(chunk, speaker_label="Me")`
+- [x] Monitor reader loop calls `pipeline.process_audio_chunk(chunk, speaker_label="Them")`
+- [x] If no monitor source is available, start mic-only — all chunks get `speaker_label="Me"`
+- [x] Update `stop()` to shut down both processes and cancel both reader tasks
+- [x] Remove `_build_ffmpeg_cmd` (the amix version) — keep `_build_ffmpeg_cmd_mic_only` as the template for both streams, renamed to `_build_stream_cmd`
+- [x] Write tests: verify two ffmpeg processes are started, each with correct source. Verify mic chunks get "Me" and monitor chunks get "Them". Verify stop() shuts down both.
+  > Replaced single amix ffmpeg process with two separate processes (`_mic_process` / `_monitor_process`). Removed `_build_ffmpeg_cmd` (amix), renamed `_build_ffmpeg_cmd_mic_only` → `_build_stream_cmd` (used for both streams). Added `_stop_process()` helper. Reader loop now parameterised with `(process, speaker_label)`. Updated all 4 recorder test files; added `test_recorder_dual_stream.py` with 20 dual-stream-specific tests. 78 new/updated tests all pass; 3 pre-existing failures unchanged.
 
 ### 1B.3 Delete diarizer.py
 - [ ] Delete `backend/audio/diarizer.py`

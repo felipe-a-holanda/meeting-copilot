@@ -69,14 +69,22 @@ class RecordingStats:
 
 
 class AudioRecorder:
-    """Captures mic + system audio via PulseAudio/ffmpeg and feeds the pipeline."""
+    """Captures mic + system audio via PulseAudio/ffmpeg and feeds the pipeline.
+
+    Two separate ffmpeg processes are used — one for the mic source (speaker_label="Me")
+    and one for the system monitor source (speaker_label="Them").  This gives deterministic
+    speaker attribution at zero ML cost, replacing pyannote diarization.
+    """
 
     def __init__(self, pipeline=None, config=None, recordings_dir: str = "./recordings"):
         self._pipeline = pipeline
         self._config = config
         self._recordings_dir = recordings_dir
-        self._process: asyncio.subprocess.Process | None = None
-        self._reader_task: asyncio.Task | None = None
+        # Separate processes and reader tasks for each audio stream
+        self._mic_process: asyncio.subprocess.Process | None = None
+        self._monitor_process: asyncio.subprocess.Process | None = None
+        self._mic_reader_task: asyncio.Task | None = None
+        self._monitor_reader_task: asyncio.Task | None = None
         self._is_recording: bool = False
         self._start_time: float | None = None
         self._chunks_processed: int = 0
@@ -183,74 +191,29 @@ class AudioRecorder:
         return defaults
 
     # ------------------------------------------------------------------
-    # ffmpeg command builders
+    # ffmpeg command builder
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _build_ffmpeg_cmd(
-        mic_source: str,
-        monitor_source: str,
-        mic_volume: float,
-        mic_file_path: str | None = None,
-        monitor_file_path: str | None = None,
+    def _build_stream_cmd(
+        source: str,
+        file_path: str | None = None,
     ) -> list[str]:
-        """Return the ffmpeg argument list for dual (mic + monitor) capture.
+        """Return the ffmpeg argument list for a single PulseAudio source stream.
 
-        When file paths are provided, the command writes separate WAV files for
-        mic and monitor streams alongside the raw PCM pipe.
+        Outputs raw 16-kHz mono s16le PCM to pipe:1.  When *file_path* is provided,
+        the command also writes a PCM WAV file as a second output.
         """
-        if mic_file_path or monitor_file_path:
-            filter_complex = (
-                f"[0:a]volume={mic_volume}[mic];"
-                "[1:a][mic]amix=inputs=2:duration=longest:normalize=0[out]"
-            )
-            cmd = [
-                "ffmpeg",
-                "-f", "pulse", "-i", mic_source,
-                "-f", "pulse", "-i", monitor_source,
-                "-filter_complex", filter_complex,
-                "-map", "[out]", "-ar", "16000", "-ac", "1", "-f", "s16le", "pipe:1",
-            ]
-            if mic_file_path:
-                cmd += ["-map", "0:a", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", mic_file_path]
-            if monitor_file_path:
-                cmd += ["-map", "1:a", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", monitor_file_path]
-            return cmd
-        filter_complex = (
-            f"[0:a]volume={mic_volume}[mic];"
-            "[1:a][mic]amix=inputs=2:duration=longest:normalize=0"
-        )
-        return [
-            "ffmpeg",
-            "-f", "pulse", "-i", mic_source,
-            "-f", "pulse", "-i", monitor_source,
-            "-filter_complex", filter_complex,
-            "-ar", "16000",
-            "-ac", "1",
-            "-f", "s16le",
-            "pipe:1",
-        ]
-
-    @staticmethod
-    def _build_ffmpeg_cmd_mic_only(
-        mic_source: str,
-        mic_file_path: str | None = None,
-    ) -> list[str]:
-        """Return the ffmpeg argument list for mic-only capture.
-
-        When *mic_file_path* is provided, the command writes a WAV file as a second
-        output alongside the raw PCM pipe.
-        """
-        if mic_file_path:
+        if file_path:
             return [
                 "ffmpeg",
-                "-f", "pulse", "-i", mic_source,
+                "-f", "pulse", "-i", source,
                 "-map", "0:a", "-ar", "16000", "-ac", "1", "-f", "s16le", "pipe:1",
-                "-map", "0:a", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", mic_file_path,
+                "-map", "0:a", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", file_path,
             ]
         return [
             "ffmpeg",
-            "-f", "pulse", "-i", mic_source,
+            "-f", "pulse", "-i", source,
             "-ar", "16000",
             "-ac", "1",
             "-f", "s16le",
@@ -295,11 +258,11 @@ class AudioRecorder:
         self,
         mic_source: str | None = None,
         monitor_source: str | None = None,
-        mic_volume: float = DEFAULT_MIC_VOLUME,
+        mic_volume: float = DEFAULT_MIC_VOLUME,  # kept for API compatibility; not used in stream cmd
         save_to_file: bool = False,
         title: str = "",
     ) -> None:
-        """Launch ffmpeg and begin recording.
+        """Launch separate ffmpeg processes for mic and monitor streams.
 
         *mic_source* and *monitor_source* default to ``None`` which means
         auto-detect via :meth:`get_defaults`.  Pass an explicit empty string
@@ -307,11 +270,10 @@ class AudioRecorder:
         auto-detected monitor is empty the recorder also falls back to
         mic-only mode.
 
-        When *save_to_file* is ``True``, ffmpeg writes separate WAV files for
-        mic and monitor streams under
-        ``recordings_dir/<YYYYMMDD>/meeting_<timestamp>/`` in addition to
-        streaming PCM to the pipeline.  A JSON metadata sidecar is written
-        when recording stops.
+        When *save_to_file* is ``True``, each ffmpeg process writes a separate
+        WAV file under ``recordings_dir/<YYYYMMDD>/meeting_<timestamp>/`` in
+        addition to streaming PCM to the pipeline.  A JSON metadata sidecar
+        is written when recording stops.
         """
         if self._is_recording:
             raise RuntimeError("Recording is already in progress")
@@ -343,25 +305,24 @@ class AudioRecorder:
             meeting_dir_path = str(meeting_dir)
             logger.info("WAV output: mic=%s monitor=%s", mic_file_path, monitor_file_path)
 
-        if monitor_source:
-            cmd = self._build_ffmpeg_cmd(mic_source, monitor_source, mic_volume, mic_file_path, monitor_file_path)
-            logger.info(
-                "Starting ffmpeg with mic=%s monitor=%s volume=%.1f",
-                mic_source,
-                monitor_source,
-                mic_volume,
-            )
-        else:
-            cmd = self._build_ffmpeg_cmd_mic_only(mic_source, mic_file_path)
-            logger.info(
-                "Starting ffmpeg mic-only (no monitor source) mic=%s", mic_source
-            )
-
-        self._process = await asyncio.create_subprocess_exec(
-            *cmd,
+        # Launch mic process (speaker_label="Me")
+        mic_cmd = self._build_stream_cmd(mic_source, mic_file_path)
+        logger.info("Starting mic ffmpeg: source=%s", mic_source)
+        self._mic_process = await asyncio.create_subprocess_exec(
+            *mic_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+
+        # Launch monitor process (speaker_label="Them") if available
+        if monitor_source:
+            monitor_cmd = self._build_stream_cmd(monitor_source, monitor_file_path)
+            logger.info("Starting monitor ffmpeg: source=%s", monitor_source)
+            self._monitor_process = await asyncio.create_subprocess_exec(
+                *monitor_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
 
         self._mic_source = mic_source
         self._monitor_source = monitor_source
@@ -374,42 +335,39 @@ class AudioRecorder:
         self._audio_files = [p for p in [mic_file_path, monitor_file_path] if p is not None]
         self._title = title
 
-        self._reader_task = asyncio.create_task(self._reader_loop())
+        self._mic_reader_task = asyncio.create_task(
+            self._reader_loop(self._mic_process, "Me")
+        )
+        if self._monitor_process is not None:
+            self._monitor_reader_task = asyncio.create_task(
+                self._reader_loop(self._monitor_process, "Them")
+            )
 
     async def stop(self) -> RecordingStats:
-        """Stop the ffmpeg process and return recording stats.
+        """Stop both ffmpeg processes and return recording stats.
 
-        Sends SIGINT first for graceful shutdown, then SIGKILL after 5 s.
+        Sends SIGINT first for graceful shutdown, then SIGKILL after 5 s per process.
         """
-        if not self._is_recording or self._process is None:
+        if not self._is_recording:
             raise RuntimeError("Not currently recording")
 
-        # Graceful shutdown
-        try:
-            self._process.send_signal(signal.SIGINT)
-        except ProcessLookupError:
-            pass  # Already exited
+        # Graceful shutdown for each process
+        if self._mic_process is not None:
+            await self._stop_process(self._mic_process)
+        if self._monitor_process is not None:
+            await self._stop_process(self._monitor_process)
 
-        try:
-            await asyncio.wait_for(self._process.wait(), timeout=5.0)
-        except asyncio.TimeoutError:
-            logger.warning("ffmpeg did not exit within 5 s — sending SIGKILL")
-            try:
-                self._process.kill()
-            except ProcessLookupError:
-                pass
-            await self._process.wait()
+        # Cancel reader tasks after ffmpeg has exited
+        for task in (self._mic_reader_task, self._monitor_reader_task):
+            if task is not None and not task.done():
+                task.cancel()
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=1.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
 
-        # Cancel reader task after ffmpeg has exited
-        if self._reader_task is not None and not self._reader_task.done():
-            self._reader_task.cancel()
-            try:
-                await asyncio.wait_for(
-                    asyncio.shield(self._reader_task), timeout=1.0
-                )
-            except (asyncio.CancelledError, asyncio.TimeoutError):
-                pass
-        self._reader_task = None
+        self._mic_reader_task = None
+        self._monitor_reader_task = None
 
         # Flush any buffered audio in the pipeline
         if self._pipeline is not None:
@@ -448,7 +406,8 @@ class AudioRecorder:
         )
 
         self._is_recording = False
-        self._process = None
+        self._mic_process = None
+        self._monitor_process = None
         self._start_time = None
         self._meeting_dir = None
         self._timestamp = ""
@@ -463,33 +422,53 @@ class AudioRecorder:
         )
         return stats
 
+    async def _stop_process(self, proc: asyncio.subprocess.Process) -> None:
+        """Send SIGINT to *proc*, wait up to 5 s, then SIGKILL if needed."""
+        try:
+            proc.send_signal(signal.SIGINT)
+        except ProcessLookupError:
+            pass  # Already exited
+
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning("ffmpeg did not exit within 5 s — sending SIGKILL")
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            await proc.wait()
+
     # ------------------------------------------------------------------
     # Reader loop
     # ------------------------------------------------------------------
 
-    async def _reader_loop(self) -> None:
+    async def _reader_loop(
+        self, process: asyncio.subprocess.Process, speaker_label: str
+    ) -> None:
         """Read PCM chunks from ffmpeg stdout and forward them to the pipeline."""
-        assert self._process is not None
-        assert self._process.stdout is not None
+        assert process.stdout is not None
 
         try:
             while True:
-                chunk = await self._process.stdout.read(CHUNK_SIZE)
+                chunk = await process.stdout.read(CHUNK_SIZE)
                 if not chunk:
-                    logger.info("Reader loop: EOF from ffmpeg stdout")
+                    logger.info("Reader loop (%s): EOF from ffmpeg stdout", speaker_label)
                     break
                 self._chunks_processed += 1
                 self._bytes_read += len(chunk)
                 if self._pipeline is not None:
                     try:
-                        await self._pipeline.process_audio_chunk(chunk)
+                        await self._pipeline.process_audio_chunk(chunk, speaker_label=speaker_label)
                     except Exception as exc:
-                        logger.error("Pipeline error processing chunk: %s", exc)
+                        logger.error(
+                            "Pipeline error processing chunk (%s): %s", speaker_label, exc
+                        )
         except asyncio.CancelledError:
-            logger.debug("Reader loop cancelled")
+            logger.debug("Reader loop (%s) cancelled", speaker_label)
             raise
         except Exception as exc:
-            logger.error("Reader loop unexpected error: %s", exc)
+            logger.error("Reader loop (%s) unexpected error: %s", speaker_label, exc)
 
     # ------------------------------------------------------------------
     # Properties

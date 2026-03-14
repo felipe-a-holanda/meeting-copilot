@@ -1,4 +1,4 @@
-"""Tests for AudioRecorder optional WAV file saving (Task 1.4)."""
+"""Tests for AudioRecorder optional WAV file saving (Tasks 1.4 / 1B.2)."""
 from __future__ import annotations
 
 import json
@@ -22,110 +22,45 @@ def _make_process_mock(returncode: int = 0):
     return proc
 
 
-class TestBuildFfmpegCmdWithFile:
-    def test_dual_source_pipe_only_unchanged(self):
-        cmd = AudioRecorder._build_ffmpeg_cmd("mic", "mon", 2.0)
-        assert "pipe:1" in cmd
-        assert "pcm_s16le" not in cmd
-        assert cmd.count("-map") == 0
-
-    def test_dual_source_with_mic_file_only(self):
-        cmd = AudioRecorder._build_ffmpeg_cmd("mic", "mon", 2.0, mic_file_path="/tmp/mic.wav")
-        assert "pipe:1" in cmd
-        assert "/tmp/mic.wav" in cmd
-        assert "pcm_s16le" in cmd
-        # pipe + mic file = 2 maps
-        assert cmd.count("-map") == 2
-
-    def test_dual_source_with_both_files(self):
-        cmd = AudioRecorder._build_ffmpeg_cmd(
-            "mic", "mon", 2.0,
-            mic_file_path="/tmp/mic.wav",
-            monitor_file_path="/tmp/mon.wav",
-        )
-        assert "pipe:1" in cmd
-        assert "/tmp/mic.wav" in cmd
-        assert "/tmp/mon.wav" in cmd
-        # pipe + mic file + monitor file = 3 maps
-        assert cmd.count("-map") == 3
-
-    def test_dual_source_with_both_files_uses_separate_map_inputs(self):
-        """mic file uses -map 0:a segment, monitor file uses -map 1:a segment."""
-        cmd = AudioRecorder._build_ffmpeg_cmd(
-            "mic", "mon", 2.0,
-            mic_file_path="/tmp/mic.wav",
-            monitor_file_path="/tmp/mon.wav",
-        )
-        pipe_idx = cmd.index("pipe:1")
-        # Collect all (-map, stream) pairs after pipe:1
-        post = cmd[pipe_idx + 1:]
-        map_pairs = [
-            (post[i + 1], post[i + 2] if i + 2 < len(post) else "")
-            for i, v in enumerate(post) if v == "-map"
-        ]
-        streams = [pair[0] for pair in map_pairs]
-        assert "0:a" in streams
-        assert "1:a" in streams
-
-    def test_dual_source_with_files_pipe_comes_first(self):
-        cmd = AudioRecorder._build_ffmpeg_cmd(
-            "mic", "mon", 2.0,
-            mic_file_path="/tmp/mic.wav",
-            monitor_file_path="/tmp/mon.wav",
-        )
-        pipe_idx = cmd.index("pipe:1")
-        mic_idx = cmd.index("/tmp/mic.wav")
-        mon_idx = cmd.index("/tmp/mon.wav")
-        assert pipe_idx < mic_idx < mon_idx
-
-    def test_dual_source_with_files_uses_named_filter_output(self):
-        cmd = AudioRecorder._build_ffmpeg_cmd(
-            "mic", "mon", 2.0, mic_file_path="/tmp/mic.wav"
-        )
-        fc_idx = cmd.index("-filter_complex")
-        assert "[out]" in cmd[fc_idx + 1]
-
-    def test_dual_source_with_files_custom_volume(self):
-        cmd = AudioRecorder._build_ffmpeg_cmd(
-            "mic", "mon", 3.5, mic_file_path="/tmp/mic.wav"
-        )
-        fc_idx = cmd.index("-filter_complex")
-        assert "volume=3.5" in cmd[fc_idx + 1]
-
-    def test_dual_source_with_files_sample_rate_and_channels(self):
-        cmd = AudioRecorder._build_ffmpeg_cmd(
-            "mic", "mon", 2.0,
-            mic_file_path="/tmp/mic.wav",
-            monitor_file_path="/tmp/mon.wav",
-        )
-        ar_indices = [i for i, v in enumerate(cmd) if v == "-ar"]
-        ac_indices = [i for i, v in enumerate(cmd) if v == "-ac"]
-        # 3 outputs = 3 -ar and 3 -ac
-        assert len(ar_indices) == 3
-        assert len(ac_indices) == 3
-        assert all(cmd[i + 1] == "16000" for i in ar_indices)
-        assert all(cmd[i + 1] == "1" for i in ac_indices)
+# ---------------------------------------------------------------------------
+# _build_stream_cmd with file output
+# ---------------------------------------------------------------------------
 
 
-class TestBuildFfmpegCmdMicOnlyWithFile:
-    def test_mic_only_pipe_only_unchanged(self):
-        cmd = AudioRecorder._build_ffmpeg_cmd_mic_only("my_mic")
+class TestBuildStreamCmdWithFile:
+    def test_no_file_pipe_only(self):
+        cmd = AudioRecorder._build_stream_cmd("my_source")
         assert "pipe:1" in cmd
         assert "pcm_s16le" not in cmd
         assert "-map" not in cmd
 
-    def test_mic_only_with_file_has_two_outputs(self):
-        cmd = AudioRecorder._build_ffmpeg_cmd_mic_only("my_mic", mic_file_path="/tmp/mic.wav")
+    def test_with_file_has_two_outputs(self):
+        cmd = AudioRecorder._build_stream_cmd("my_source", file_path="/tmp/out.wav")
         assert "pipe:1" in cmd
-        assert "/tmp/mic.wav" in cmd
+        assert "/tmp/out.wav" in cmd
         assert "pcm_s16le" in cmd
         assert cmd.count("-map") == 2
 
-    def test_mic_only_with_file_correct_output_order(self):
-        cmd = AudioRecorder._build_ffmpeg_cmd_mic_only("my_mic", mic_file_path="/tmp/mic.wav")
+    def test_with_file_correct_output_order(self):
+        cmd = AudioRecorder._build_stream_cmd("my_source", file_path="/tmp/out.wav")
         pipe_idx = cmd.index("pipe:1")
-        file_idx = cmd.index("/tmp/mic.wav")
+        file_idx = cmd.index("/tmp/out.wav")
         assert pipe_idx < file_idx
+
+    def test_with_file_sample_rate_and_channels(self):
+        cmd = AudioRecorder._build_stream_cmd("my_source", file_path="/tmp/out.wav")
+        ar_indices = [i for i, v in enumerate(cmd) if v == "-ar"]
+        ac_indices = [i for i, v in enumerate(cmd) if v == "-ac"]
+        # 2 outputs (pipe + file) = 2 -ar and 2 -ac
+        assert len(ar_indices) == 2
+        assert len(ac_indices) == 2
+        assert all(cmd[i + 1] == "16000" for i in ar_indices)
+        assert all(cmd[i + 1] == "1" for i in ac_indices)
+
+
+# ---------------------------------------------------------------------------
+# _make_recording_path
+# ---------------------------------------------------------------------------
 
 
 class TestMakeRecordingPath:
@@ -157,6 +92,11 @@ class TestMakeRecordingPath:
         AudioRecorder._make_recording_path(str(tmp_path), timestamp)
         meeting_dir, _, _ = AudioRecorder._make_recording_path(str(tmp_path), timestamp)
         assert meeting_dir.exists()
+
+
+# ---------------------------------------------------------------------------
+# _write_metadata
+# ---------------------------------------------------------------------------
 
 
 class TestWriteMetadata:
@@ -203,40 +143,65 @@ class TestWriteMetadata:
         assert len(data["audio_files"]) == 1
 
 
+# ---------------------------------------------------------------------------
+# start() with save_to_file
+# ---------------------------------------------------------------------------
+
+
 class TestStartWithSaveToFile:
     @pytest.mark.asyncio
     async def test_start_save_false_no_file_output(self):
         recorder = AudioRecorder()
-        proc_mock = _make_process_mock()
-        with patch("asyncio.create_subprocess_exec", return_value=proc_mock) as mock_exec:
+        mic_mock = _make_process_mock()
+        monitor_mock = _make_process_mock()
+        with patch(
+            "asyncio.create_subprocess_exec", side_effect=[mic_mock, monitor_mock]
+        ) as mock_exec:
             await recorder.start(mic_source="mic", monitor_source="mon", save_to_file=False)
-        cmd = mock_exec.call_args[0]
-        assert "pcm_s16le" not in cmd
+        for call_args in mock_exec.call_args_list:
+            cmd = call_args[0]
+            assert "pcm_s16le" not in cmd
         assert recorder._meeting_dir is None
         assert recorder._audio_files == []
 
     @pytest.mark.asyncio
-    async def test_start_save_true_dual_stream_two_files(self, tmp_path):
+    async def test_start_save_true_dual_stream_two_separate_wav_files(self, tmp_path):
+        """Each stream gets its own ffmpeg call, each with a WAV file output."""
         recorder = AudioRecorder(recordings_dir=str(tmp_path))
-        proc_mock = _make_process_mock()
-        with patch("asyncio.create_subprocess_exec", return_value=proc_mock) as mock_exec:
+        mic_mock = _make_process_mock()
+        monitor_mock = _make_process_mock()
+        with patch(
+            "asyncio.create_subprocess_exec", side_effect=[mic_mock, monitor_mock]
+        ) as mock_exec:
             await recorder.start(mic_source="mic", monitor_source="mon", save_to_file=True)
-        cmd = mock_exec.call_args[0]
-        assert "pcm_s16le" in cmd
-        assert "pipe:1" in cmd
-        # Two WAV outputs for dual stream
-        assert sum(1 for arg in cmd if arg.endswith(".wav")) == 2
-        # Separate mic and monitor filenames
-        wav_args = [arg for arg in cmd if arg.endswith(".wav")]
-        assert any("_mic.wav" in p for p in wav_args)
-        assert any("_monitor.wav" in p for p in wav_args)
+
+        assert mock_exec.call_count == 2
+        # First call (mic): contains mic WAV
+        mic_cmd = mock_exec.call_args_list[0][0]
+        assert "pcm_s16le" in mic_cmd
+        assert "pipe:1" in mic_cmd
+        mic_wavs = [a for a in mic_cmd if isinstance(a, str) and a.endswith(".wav")]
+        assert len(mic_wavs) == 1
+        assert "_mic.wav" in mic_wavs[0]
+
+        # Second call (monitor): contains monitor WAV
+        mon_cmd = mock_exec.call_args_list[1][0]
+        assert "pcm_s16le" in mon_cmd
+        assert "pipe:1" in mon_cmd
+        mon_wavs = [a for a in mon_cmd if isinstance(a, str) and a.endswith(".wav")]
+        assert len(mon_wavs) == 1
+        assert "_monitor.wav" in mon_wavs[0]
+
         assert len(recorder._audio_files) == 2
 
     @pytest.mark.asyncio
     async def test_start_save_true_creates_directory(self, tmp_path):
         recorder = AudioRecorder(recordings_dir=str(tmp_path))
-        proc_mock = _make_process_mock()
-        with patch("asyncio.create_subprocess_exec", return_value=proc_mock):
+        mic_mock = _make_process_mock()
+        monitor_mock = _make_process_mock()
+        with patch(
+            "asyncio.create_subprocess_exec", side_effect=[mic_mock, monitor_mock]
+        ):
             await recorder.start(mic_source="mic", monitor_source="mon", save_to_file=True)
         assert recorder._meeting_dir is not None
         assert Path(recorder._meeting_dir).exists()
@@ -244,8 +209,11 @@ class TestStartWithSaveToFile:
     @pytest.mark.asyncio
     async def test_start_stores_title(self):
         recorder = AudioRecorder()
-        proc_mock = _make_process_mock()
-        with patch("asyncio.create_subprocess_exec", return_value=proc_mock):
+        mic_mock = _make_process_mock()
+        monitor_mock = _make_process_mock()
+        with patch(
+            "asyncio.create_subprocess_exec", side_effect=[mic_mock, monitor_mock]
+        ):
             await recorder.start(mic_source="mic", monitor_source="mon", title="My Meeting")
         assert recorder._title == "My Meeting"
 
@@ -253,24 +221,32 @@ class TestStartWithSaveToFile:
     async def test_start_save_true_mic_only_one_file(self, tmp_path):
         """Mic-only fallback should save only mic.wav."""
         recorder = AudioRecorder(recordings_dir=str(tmp_path))
-        proc_mock = _make_process_mock()
-        with patch("asyncio.create_subprocess_exec", return_value=proc_mock) as mock_exec:
+        mic_mock = _make_process_mock()
+        with patch("asyncio.create_subprocess_exec", return_value=mic_mock) as mock_exec:
             await recorder.start(mic_source="mic", monitor_source="", save_to_file=True)
-        cmd = mock_exec.call_args[0]
-        assert "pcm_s16le" in cmd
-        assert "-filter_complex" not in cmd
-        wav_args = [arg for arg in cmd if arg.endswith(".wav")]
+        assert mock_exec.call_count == 1
+        mic_cmd = mock_exec.call_args_list[0][0]
+        assert "pcm_s16le" in mic_cmd
+        wav_args = [a for a in mic_cmd if isinstance(a, str) and a.endswith(".wav")]
         assert len(wav_args) == 1
         assert "_mic.wav" in wav_args[0]
         assert len(recorder._audio_files) == 1
+
+
+# ---------------------------------------------------------------------------
+# stop() with file saving
+# ---------------------------------------------------------------------------
 
 
 class TestStopWithFileSaving:
     @pytest.mark.asyncio
     async def test_stop_returns_audio_files_when_saving(self, tmp_path):
         recorder = AudioRecorder(recordings_dir=str(tmp_path))
-        proc_mock = _make_process_mock()
-        with patch("asyncio.create_subprocess_exec", return_value=proc_mock):
+        mic_mock = _make_process_mock()
+        monitor_mock = _make_process_mock()
+        with patch(
+            "asyncio.create_subprocess_exec", side_effect=[mic_mock, monitor_mock]
+        ):
             await recorder.start(mic_source="mic", monitor_source="mon", save_to_file=True)
         stats = await recorder.stop()
         assert isinstance(stats, RecordingStats)
@@ -281,8 +257,11 @@ class TestStopWithFileSaving:
     @pytest.mark.asyncio
     async def test_stop_returns_file_path_as_meeting_dir(self, tmp_path):
         recorder = AudioRecorder(recordings_dir=str(tmp_path))
-        proc_mock = _make_process_mock()
-        with patch("asyncio.create_subprocess_exec", return_value=proc_mock):
+        mic_mock = _make_process_mock()
+        monitor_mock = _make_process_mock()
+        with patch(
+            "asyncio.create_subprocess_exec", side_effect=[mic_mock, monitor_mock]
+        ):
             await recorder.start(mic_source="mic", monitor_source="mon", save_to_file=True)
         stats = await recorder.stop()
         assert stats.file_path is not None
@@ -291,8 +270,11 @@ class TestStopWithFileSaving:
     @pytest.mark.asyncio
     async def test_stop_returns_empty_audio_files_when_not_saving(self):
         recorder = AudioRecorder()
-        proc_mock = _make_process_mock()
-        with patch("asyncio.create_subprocess_exec", return_value=proc_mock):
+        mic_mock = _make_process_mock()
+        monitor_mock = _make_process_mock()
+        with patch(
+            "asyncio.create_subprocess_exec", side_effect=[mic_mock, monitor_mock]
+        ):
             await recorder.start(mic_source="mic", monitor_source="mon", save_to_file=False)
         stats = await recorder.stop()
         assert stats.file_path is None
@@ -301,8 +283,11 @@ class TestStopWithFileSaving:
     @pytest.mark.asyncio
     async def test_stop_writes_metadata_when_saving(self, tmp_path):
         recorder = AudioRecorder(recordings_dir=str(tmp_path))
-        proc_mock = _make_process_mock()
-        with patch("asyncio.create_subprocess_exec", return_value=proc_mock):
+        mic_mock = _make_process_mock()
+        monitor_mock = _make_process_mock()
+        with patch(
+            "asyncio.create_subprocess_exec", side_effect=[mic_mock, monitor_mock]
+        ):
             await recorder.start(
                 mic_source="mic", monitor_source="mon",
                 save_to_file=True, title="Sprint Review",
@@ -319,8 +304,11 @@ class TestStopWithFileSaving:
     @pytest.mark.asyncio
     async def test_stop_clears_state(self, tmp_path):
         recorder = AudioRecorder(recordings_dir=str(tmp_path))
-        proc_mock = _make_process_mock()
-        with patch("asyncio.create_subprocess_exec", return_value=proc_mock):
+        mic_mock = _make_process_mock()
+        monitor_mock = _make_process_mock()
+        with patch(
+            "asyncio.create_subprocess_exec", side_effect=[mic_mock, monitor_mock]
+        ):
             await recorder.start(mic_source="mic", monitor_source="mon", save_to_file=True)
         await recorder.stop()
         assert recorder._meeting_dir is None
@@ -331,8 +319,11 @@ class TestStopWithFileSaving:
     async def test_stop_does_not_crash_if_metadata_write_fails(self):
         """Metadata write failure should be logged but not crash stop()."""
         recorder = AudioRecorder()
-        proc_mock = _make_process_mock()
-        with patch("asyncio.create_subprocess_exec", return_value=proc_mock):
+        mic_mock = _make_process_mock()
+        monitor_mock = _make_process_mock()
+        with patch(
+            "asyncio.create_subprocess_exec", side_effect=[mic_mock, monitor_mock]
+        ):
             await recorder.start(mic_source="mic", monitor_source="mon", save_to_file=False)
             # Force a bad state to trigger metadata failure
             recorder._meeting_dir = "/nonexistent_dir/that_cannot_exist"
