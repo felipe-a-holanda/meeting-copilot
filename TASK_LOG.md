@@ -4,8 +4,8 @@
 > `[ ]` = pending | `[x]` = done | `[!]` = blocked
 >
 > **Context**: Read `ARCHITECTURE_REFACTOR.md` for full design details.
-> **Scope**: Move audio capture from browser (getUserMedia) to backend (PulseAudio + ffmpeg).
-> **Constraint**: The existing AudioPipeline, reasoning engine, and WebSocket control channel must remain unchanged. Only the audio source changes.
+> **Scope**: Move audio capture from browser (getUserMedia) to backend (PulseAudio + ffmpeg). Drop pyannote diarization in favour of stream-based speaker labels ("Me" / "Them").
+> **Constraint**: The reasoning engine and WebSocket control channel must remain unchanged. Only the audio source and speaker attribution method change.
 
 ---
 
@@ -46,11 +46,58 @@
   > `_reader_loop` reads CHUNK_SIZE bytes, forwards each to `pipeline.process_audio_chunk`, handles EOF cleanly and logs errors without crashing. `start()` stores the task in `_reader_task`. `stop()` cancels the task and calls `pipeline.reset()`. 9 tests all passing.
 
 ### 1.4 Optional WAV File Saving
-- [ ] Add `save_to_file` parameter to `start()` — when provided, use ffmpeg tee muxer or a second output to write a WAV file alongside piping to stdout
-- [ ] The ffmpeg command becomes: `ffmpeg ... -f s16le pipe:1 -ar 16000 -ac 1 -c:a pcm_s16le <file_path>` (two outputs)
-- [ ] Create recordings directory structure: `<recordings_dir>/<YYYYMMDD>/meeting_<timestamp>/`
-- [ ] Write a JSON metadata sidecar file (same format as record_audio.sh): title, timestamp, audio_file, created_at, source
-- [ ] Write tests: verify ffmpeg command includes file output when `save_to_file=True`. Verify directory creation. Verify metadata JSON structure.
+- [x] Add `save_to_file` parameter to `start()` — when provided, add a second `-c:a pcm_s16le <file_path>` output to each ffmpeg process
+- [x] Save two separate WAV files: `meeting_<timestamp>_mic.wav` and `meeting_<timestamp>_monitor.wav` (one per stream — **do not mix**)
+- [x] Create recordings directory structure: `<recordings_dir>/<YYYYMMDD>/meeting_<timestamp>/`
+- [x] Write a JSON metadata sidecar file: title, timestamp, audio files, created_at, source
+- [x] Write tests: verify ffmpeg commands include file outputs when `save_to_file=True`. Verify directory creation. Verify metadata JSON structure.
+  > `_build_ffmpeg_cmd` accepts `mic_file_path` + `monitor_file_path` and adds `-map 0:a`/`-map 1:a` outputs; `_build_ffmpeg_cmd_mic_only` accepts `mic_file_path`. `_make_recording_path` returns `(meeting_dir, mic_wav, monitor_wav)`. `_write_metadata` takes `audio_files: list[str]`. `RecordingStats` has `file_path` (meeting dir) and `audio_files` (list of WAV paths). Fixed reader-loop hang in all test mocks (`stdout.read = AsyncMock(return_value=b"")`). 32 tests all passing; all 47 prior tests still passing.
+
+---
+
+## Phase 1B — Dual-Stream Speaker Labels (Drop Diarization)
+
+> **Why**: mic = local user ("Me"), system monitor = remote participants ("Them").
+> Keeping streams separate gives 100% accurate speaker attribution for zero ML cost.
+> pyannote diarization is expensive (~400 ms/chunk), requires a HuggingFace token,
+> and downloads ~500 MB of models — all unnecessary for the primary use case.
+
+### 1B.1 Update AudioPipeline — Add speaker_label, Remove Diarization
+- [ ] Add `speaker_label: str = "Speaker"` parameter to `AudioPipeline.process_audio_chunk()`
+- [ ] In `_process_buffer()`, replace the diarization lookup block with `speaker = speaker_label` passed from the caller
+- [ ] Remove the `SpeakerDiarizer` import and `self._diarizer` field
+- [ ] Remove `set_diarization_enabled()` method
+- [ ] Remove the diarization block in `_process_buffer()` entirely
+- [ ] Write/update tests: verify `speaker_label` is forwarded to `TranscriptSegment`. Verify no diarizer is instantiated.
+
+### 1B.2 Refactor AudioRecorder — Two Separate ffmpeg Processes
+- [ ] Replace the single `amix` ffmpeg command with two separate ffmpeg processes:
+  - Mic process: `-f pulse -i <mic_source> -ar 16000 -ac 1 -f s16le pipe:1`
+  - Monitor process: `-f pulse -i <monitor_source> -ar 16000 -ac 1 -f s16le pipe:1`
+- [ ] Add separate state fields: `_mic_process`, `_monitor_process`, `_mic_reader_task`, `_monitor_reader_task`
+- [ ] Mic reader loop calls `pipeline.process_audio_chunk(chunk, speaker_label="Me")`
+- [ ] Monitor reader loop calls `pipeline.process_audio_chunk(chunk, speaker_label="Them")`
+- [ ] If no monitor source is available, start mic-only — all chunks get `speaker_label="Me"`
+- [ ] Update `stop()` to shut down both processes and cancel both reader tasks
+- [ ] Remove `_build_ffmpeg_cmd` (the amix version) — keep `_build_ffmpeg_cmd_mic_only` as the template for both streams, renamed to `_build_stream_cmd`
+- [ ] Write tests: verify two ffmpeg processes are started, each with correct source. Verify mic chunks get "Me" and monitor chunks get "Them". Verify stop() shuts down both.
+
+### 1B.3 Delete diarizer.py
+- [ ] Delete `backend/audio/diarizer.py`
+- [ ] Remove `SpeakerDiarizer` import from any file that still references it
+- [ ] Verify no remaining references with `grep -r "diarizer\|SpeakerDiarizer\|pyannote" backend/`
+
+### 1B.4 Remove Diarization Config and Dependency
+- [ ] In `backend/config.py`, remove `enable_diarization: bool = True` and `hf_token: str = ""`
+- [ ] In `pyproject.toml`, remove `pyannote.audio>=3.1` from dependencies
+- [ ] Run `pip install -e .` (or equivalent) to verify install succeeds without pyannote
+- [ ] Run `pytest` — all existing tests must still pass
+
+### 1B.5 Update ARCHITECTURE.md
+- [ ] Update the Audio Capture section: replace "VAD → Whisper → Diarize" with "VAD → Whisper (per-stream)"
+- [ ] Update the ffmpeg command example to show two separate processes instead of amix
+- [ ] Add a note under Known Considerations replacing the diarization tradeoff with the dual-stream tradeoff (cannot distinguish multiple remote speakers)
+- [ ] Remove pyannote from the Python Dependencies list
 
 ---
 

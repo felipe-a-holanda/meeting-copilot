@@ -23,6 +23,7 @@ def _make_process_mock(returncode: int = 0):
     """Return a mock that looks like asyncio.subprocess.Process."""
     proc = MagicMock()
     proc.stdout = AsyncMock()
+    proc.stdout.read = AsyncMock(return_value=b"")  # EOF immediately — prevents reader loop hang
     proc.stderr = AsyncMock()
     proc.returncode = returncode
     proc.wait = AsyncMock(return_value=returncode)

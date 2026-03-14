@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import shutil
 import signal
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -61,14 +64,17 @@ class RecordingStats:
     chunks_processed: int = 0
     bytes_read: int = 0
     is_recording: bool = False
+    file_path: str | None = None   # meeting directory when saving, else None
+    audio_files: list[str] = field(default_factory=list)  # WAV file paths
 
 
 class AudioRecorder:
     """Captures mic + system audio via PulseAudio/ffmpeg and feeds the pipeline."""
 
-    def __init__(self, pipeline=None, config=None):
+    def __init__(self, pipeline=None, config=None, recordings_dir: str = "./recordings"):
         self._pipeline = pipeline
         self._config = config
+        self._recordings_dir = recordings_dir
         self._process: asyncio.subprocess.Process | None = None
         self._reader_task: asyncio.Task | None = None
         self._is_recording: bool = False
@@ -77,6 +83,10 @@ class AudioRecorder:
         self._bytes_read: int = 0
         self._mic_source: str = ""
         self._monitor_source: str = ""
+        self._meeting_dir: str | None = None
+        self._timestamp: str = ""
+        self._audio_files: list[str] = []
+        self._title: str = ""
 
     @staticmethod
     async def check_dependencies() -> DependencyStatus:
@@ -181,8 +191,31 @@ class AudioRecorder:
         mic_source: str,
         monitor_source: str,
         mic_volume: float,
+        mic_file_path: str | None = None,
+        monitor_file_path: str | None = None,
     ) -> list[str]:
-        """Return the ffmpeg argument list for dual (mic + monitor) capture."""
+        """Return the ffmpeg argument list for dual (mic + monitor) capture.
+
+        When file paths are provided, the command writes separate WAV files for
+        mic and monitor streams alongside the raw PCM pipe.
+        """
+        if mic_file_path or monitor_file_path:
+            filter_complex = (
+                f"[0:a]volume={mic_volume}[mic];"
+                "[1:a][mic]amix=inputs=2:duration=longest:normalize=0[out]"
+            )
+            cmd = [
+                "ffmpeg",
+                "-f", "pulse", "-i", mic_source,
+                "-f", "pulse", "-i", monitor_source,
+                "-filter_complex", filter_complex,
+                "-map", "[out]", "-ar", "16000", "-ac", "1", "-f", "s16le", "pipe:1",
+            ]
+            if mic_file_path:
+                cmd += ["-map", "0:a", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", mic_file_path]
+            if monitor_file_path:
+                cmd += ["-map", "1:a", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", monitor_file_path]
+            return cmd
         filter_complex = (
             f"[0:a]volume={mic_volume}[mic];"
             "[1:a][mic]amix=inputs=2:duration=longest:normalize=0"
@@ -199,8 +232,22 @@ class AudioRecorder:
         ]
 
     @staticmethod
-    def _build_ffmpeg_cmd_mic_only(mic_source: str) -> list[str]:
-        """Return the ffmpeg argument list for mic-only capture."""
+    def _build_ffmpeg_cmd_mic_only(
+        mic_source: str,
+        mic_file_path: str | None = None,
+    ) -> list[str]:
+        """Return the ffmpeg argument list for mic-only capture.
+
+        When *mic_file_path* is provided, the command writes a WAV file as a second
+        output alongside the raw PCM pipe.
+        """
+        if mic_file_path:
+            return [
+                "ffmpeg",
+                "-f", "pulse", "-i", mic_source,
+                "-map", "0:a", "-ar", "16000", "-ac", "1", "-f", "s16le", "pipe:1",
+                "-map", "0:a", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", mic_file_path,
+            ]
         return [
             "ffmpeg",
             "-f", "pulse", "-i", mic_source,
@@ -209,6 +256,36 @@ class AudioRecorder:
             "-f", "s16le",
             "pipe:1",
         ]
+
+    @staticmethod
+    def _make_recording_path(recordings_dir: str, timestamp: str) -> tuple[Path, str, str]:
+        """Create the dated meeting directory; return (meeting_dir, mic_filename, monitor_filename)."""
+        date_str = timestamp[:8]  # YYYYMMDD
+        meeting_dir = Path(recordings_dir) / date_str / f"meeting_{timestamp}"
+        meeting_dir.mkdir(parents=True, exist_ok=True)
+        mic_filename = f"meeting_{timestamp}_mic.wav"
+        monitor_filename = f"meeting_{timestamp}_monitor.wav"
+        return meeting_dir, mic_filename, monitor_filename
+
+    @staticmethod
+    def _write_metadata(
+        meeting_dir: Path,
+        title: str,
+        timestamp: str,
+        audio_files: list[str],
+    ) -> None:
+        """Write a JSON metadata sidecar file."""
+        metadata_file = meeting_dir / f"meeting_{timestamp}_metadata.json"
+        date_str = timestamp[:8]
+        metadata = {
+            "title": title,
+            "timestamp": timestamp,
+            "date": date_str,
+            "audio_files": audio_files,
+            "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "source": "local_recording",
+        }
+        metadata_file.write_text(json.dumps(metadata, indent=2))
 
     # ------------------------------------------------------------------
     # Recording lifecycle
@@ -219,6 +296,8 @@ class AudioRecorder:
         mic_source: str | None = None,
         monitor_source: str | None = None,
         mic_volume: float = DEFAULT_MIC_VOLUME,
+        save_to_file: bool = False,
+        title: str = "",
     ) -> None:
         """Launch ffmpeg and begin recording.
 
@@ -227,6 +306,12 @@ class AudioRecorder:
         ``""`` for *monitor_source* to force mic-only mode.  When the
         auto-detected monitor is empty the recorder also falls back to
         mic-only mode.
+
+        When *save_to_file* is ``True``, ffmpeg writes separate WAV files for
+        mic and monitor streams under
+        ``recordings_dir/<YYYYMMDD>/meeting_<timestamp>/`` in addition to
+        streaming PCM to the pipeline.  A JSON metadata sidecar is written
+        when recording stops.
         """
         if self._is_recording:
             raise RuntimeError("Recording is already in progress")
@@ -242,8 +327,24 @@ class AudioRecorder:
         if not mic_source:
             raise RuntimeError("No microphone source available")
 
+        # Prepare optional WAV file paths
+        mic_file_path: str | None = None
+        monitor_file_path: str | None = None
+        meeting_dir_path: str | None = None
+        recording_timestamp: str = ""
+
+        if save_to_file:
+            recording_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            meeting_dir, mic_filename, monitor_filename = self._make_recording_path(
+                self._recordings_dir, recording_timestamp
+            )
+            mic_file_path = str(meeting_dir / mic_filename)
+            monitor_file_path = str(meeting_dir / monitor_filename) if monitor_source else None
+            meeting_dir_path = str(meeting_dir)
+            logger.info("WAV output: mic=%s monitor=%s", mic_file_path, monitor_file_path)
+
         if monitor_source:
-            cmd = self._build_ffmpeg_cmd(mic_source, monitor_source, mic_volume)
+            cmd = self._build_ffmpeg_cmd(mic_source, monitor_source, mic_volume, mic_file_path, monitor_file_path)
             logger.info(
                 "Starting ffmpeg with mic=%s monitor=%s volume=%.1f",
                 mic_source,
@@ -251,7 +352,7 @@ class AudioRecorder:
                 mic_volume,
             )
         else:
-            cmd = self._build_ffmpeg_cmd_mic_only(mic_source)
+            cmd = self._build_ffmpeg_cmd_mic_only(mic_source, mic_file_path)
             logger.info(
                 "Starting ffmpeg mic-only (no monitor source) mic=%s", mic_source
             )
@@ -268,6 +369,10 @@ class AudioRecorder:
         self._start_time = time.monotonic()
         self._chunks_processed = 0
         self._bytes_read = 0
+        self._meeting_dir = meeting_dir_path
+        self._timestamp = recording_timestamp
+        self._audio_files = [p for p in [mic_file_path, monitor_file_path] if p is not None]
+        self._title = title
 
         self._reader_task = asyncio.create_task(self._reader_loop())
 
@@ -319,16 +424,36 @@ class AudioRecorder:
             else 0.0
         )
 
+        # Write metadata sidecar if we were saving to file
+        if self._meeting_dir and self._audio_files:
+            try:
+                meeting_dir = Path(self._meeting_dir)
+                self._write_metadata(
+                    meeting_dir,
+                    self._title,
+                    self._timestamp,
+                    [Path(f).name for f in self._audio_files],
+                )
+                logger.info("Metadata written for %s", self._meeting_dir)
+            except Exception as exc:
+                logger.error("Failed to write recording metadata: %s", exc)
+
         stats = RecordingStats(
             duration_seconds=duration,
             chunks_processed=self._chunks_processed,
             bytes_read=self._bytes_read,
             is_recording=False,
+            file_path=self._meeting_dir,
+            audio_files=list(self._audio_files),
         )
 
         self._is_recording = False
         self._process = None
         self._start_time = None
+        self._meeting_dir = None
+        self._timestamp = ""
+        self._audio_files = []
+        self._title = ""
 
         logger.info(
             "Recording stopped — duration=%.1f s chunks=%d bytes=%d",
@@ -387,4 +512,6 @@ class AudioRecorder:
             chunks_processed=self._chunks_processed,
             bytes_read=self._bytes_read,
             is_recording=self._is_recording,
+            file_path=self._meeting_dir,
+            audio_files=list(self._audio_files),
         )
