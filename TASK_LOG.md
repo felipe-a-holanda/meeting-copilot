@@ -17,9 +17,11 @@
 > Done: Created full directory tree (backend/, audio/, reasoning/, reasoning/workers/, ws/, storage/, frontend/, scripts/, tests/). pyproject.toml includes all deps + dev extras. All __init__.py files in place. Settings class verified working with pydantic-settings. .env.example documents all 15 config vars with comments.
 
 ### 1.2 WebSocket Protocol
-- [ ] Create `backend/ws/protocol.py` with all Pydantic message models (TranscriptSegment, SummaryUpdate, ActionItemsUpdate, ContradictionAlert, ReplySuggestion, CustomPromptResult, RequestReplySuggestion, CustomPromptRequest)
-- [ ] Create `backend/ws/gateway.py` with ConnectionManager class (connect, disconnect, broadcast)
-- [ ] Write tests: `tests/test_protocol.py` — verify all models serialize/deserialize correctly
+- [x] Create `backend/ws/protocol.py` with all Pydantic message models (TranscriptSegment, SummaryUpdate, ActionItemsUpdate, ContradictionAlert, ReplySuggestion, CustomPromptResult, RequestReplySuggestion, CustomPromptRequest)
+- [x] Create `backend/ws/gateway.py` with ConnectionManager class (connect, disconnect, broadcast)
+- [x] Write tests: `tests/test_protocol.py` — verify all models serialize/deserialize correctly
+
+> Done: All 8 message models implemented with Literal type discriminators. ConnectionManager handles connect/disconnect/broadcast with dead-connection cleanup. 25 tests pass covering serialization, JSON round-trips, default values, and validation errors.
 
 ### 1.3 FastAPI Skeleton
 - [ ] Create `backend/main.py` with FastAPI app, both WebSocket endpoints (`/ws/audio`, `/ws/control`), and CORS middleware
