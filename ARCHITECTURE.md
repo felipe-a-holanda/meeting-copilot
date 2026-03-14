@@ -2,11 +2,11 @@
 
 ## Project Overview
 
-A real-time meeting copilot that transcribes, diarizes, summarizes, extracts action items, detects contradictions, and suggests replies — all while the meeting is happening. Built with a local-first approach (Whisper + Ollama), with optional API fallback for heavier reasoning tasks.
+A real-time meeting copilot that transcribes, attributes speakers, summarizes, extracts action items, detects contradictions, and suggests replies — all while the meeting is happening. Built with a local-first approach (Whisper + Ollama), with optional API fallback for heavier reasoning tasks.
 
 ### Core Requirements
 
-- **Real-time transcription** with speaker diarization (who said what)
+- **Real-time transcription** with per-stream speaker labels (Me / Them)
 - **Progressive summarization** that condenses as the meeting progresses
 - **Action item / decision extraction** updated live
 - **Contextual alerts** (contradictions, topic drift, unresolved questions)
@@ -59,7 +59,7 @@ A real-time meeting copilot that transcribes, diarizes, summarizes, extracts act
 │                          ▼                                   │
 │  ┌──────────────────────────────────┐                       │
 │  │     AudioPipeline                 │                       │
-│  │  VAD (Silero) → Whisper → Diarize │                       │
+│  │  VAD (Silero) → Whisper (per-stream)│                     │
 │  └──────────────┬───────────────────┘                       │
 │                 ▼                                            │
 │  ┌──────────────────────────────────┐                       │
@@ -110,11 +110,10 @@ meeting-copilot/
 │   │
 │   ├── audio/
 │   │   ├── __init__.py
-│   │   ├── pipeline.py             # AudioPipeline: VAD → Whisper → diarization → segments
+│   │   ├── pipeline.py             # AudioPipeline: VAD → Whisper (per-stream) → segments
 │   │   ├── vad.py                  # Voice Activity Detection (Silero)
 │   │   ├── transcriber.py          # faster-whisper wrapper
-│   │   ├── diarizer.py             # pyannote speaker diarization
-│   │   ├── recorder.py             # AudioRecorder: ffmpeg + PulseAudio backend capture
+│   │   ├── recorder.py             # AudioRecorder: two ffmpeg processes (mic + monitor)
 │   │   └── file_processor.py       # Batch processing of uploaded audio files
 │   │
 │   ├── reasoning/
@@ -167,7 +166,7 @@ meeting-copilot/
 │
 └── scripts/
     ├── setup.sh                    # Install deps + download models
-    └── download_models.sh          # Pre-download Whisper + pyannote models
+    └── download_models.sh          # Pre-download Whisper models
 ```
 
 ---
@@ -328,18 +327,20 @@ class AudioRecorder:
     def is_recording(self) -> bool: ...
 ```
 
-**ffmpeg command** (from proven `record_audio.sh`):
+**ffmpeg commands** — two separate processes, one per stream:
 
 ```bash
-ffmpeg \
-  -f pulse -i <mic_source> \
-  -f pulse -i <monitor_source> \
-  -filter_complex '[0:a]volume=2.0[mic];[1:a][mic]amix=inputs=2:duration=longest:normalize=0' \
-  -ar 16000 -ac 1 -f s16le \
-  pipe:1
+# Mic process (speaker_label="Me")
+ffmpeg -f pulse -i <mic_source> -ar 16000 -ac 1 -f s16le pipe:1
+
+# Monitor process (speaker_label="Them")
+ffmpeg -f pulse -i <monitor_source> -ar 16000 -ac 1 -f s16le pipe:1
 ```
 
-Output: raw int16 PCM to stdout — exactly what `AudioPipeline.process_audio_chunk()` expects.
+Each process pipes raw int16 PCM to stdout. The mic reader calls
+`pipeline.process_audio_chunk(chunk, speaker_label="Me")` and the monitor
+reader calls `pipeline.process_audio_chunk(chunk, speaker_label="Them")`.
+Speaker attribution is exact — no ML required.
 
 ### Browser Capture (Fallback)
 
@@ -512,16 +513,15 @@ Respond helpfully based on the meeting context. Be concise and actionable."""
 ```python
 # backend/audio/pipeline.py
 class AudioPipeline:
-    """VAD → Whisper → Diarization pipeline. Accepts raw int16 PCM bytes."""
+    """VAD → Whisper (per-stream) pipeline. Accepts raw int16 PCM bytes."""
 
     def __init__(self, config): ...
     def on_segment(self, callback): ...
-    async def process_audio_chunk(self, chunk: bytes):
+    async def process_audio_chunk(self, chunk: bytes, speaker_label: str = "Speaker"):
         """Feed raw PCM audio data. Buffers until 1s of audio, then:
         1. Run Silero VAD — discard if no speech
         2. Transcribe via faster-whisper
-        3. (Optional) Diarize via pyannote
-        4. Emit TranscriptSegment via callback
+        3. Emit TranscriptSegment with the provided speaker_label
         """
 ```
 
@@ -590,7 +590,7 @@ class SessionStore:
 2. Backend creates session, launches ffmpeg subprocess (mic + system monitor)
 3. ffmpeg streams mixed PCM to stdout → backend reads in asyncio loop
 4. `AudioPipeline.process_audio_chunk()` receives PCM chunks
-5. Pipeline: VAD → Whisper → diarization → emits `TranscriptSegment`
+5. Pipeline: VAD → Whisper → emits `TranscriptSegment` (speaker label from stream)
 6. `ContextManager` accumulates segments → triggers LLM workers
 7. WebSocket `/ws/control` broadcasts transcripts + insights to frontend
 8. User clicks **Stop** → `POST /api/recording/stop` → ffmpeg stops → pipeline flushes
@@ -615,7 +615,6 @@ class Settings(BaseSettings):
     # Audio Pipeline
     whisper_model: str = "large-v3-turbo"
     language: str = "pt"
-    enable_diarization: bool = True
 
     # Audio Capture (backend mode)
     audio_capture_mode: str = "backend"     # "backend" | "browser" | "both"
@@ -674,7 +673,6 @@ dependencies = [
     "pydantic-settings>=2.0",
     "httpx>=0.27",
     "faster-whisper>=1.0",
-    "pyannote.audio>=3.1",
     "silero-vad>=4.0",
     "anthropic>=0.40",
     "aiosqlite>=0.20",
@@ -687,7 +685,7 @@ dependencies = [
 
 1. **Whisper latency vs accuracy**: `large-v3` gives best accuracy but adds ~2-3s latency. `large-v3-turbo` is the current default for a good balance. For faster response, use `medium` or `small`.
 
-2. **Diarization accuracy**: pyannote works best with clear audio and distinct speakers. Overlapping speech and phone-quality audio degrade results. Diarization is optional via config.
+2. **Dual-stream speaker attribution**: mic stream is always "Me", monitor stream is always "Them". This gives 100% accurate two-party labelling at zero ML cost, but cannot distinguish individual remote speakers in a multi-person call (all remote audio is labelled "Them"). For meetings with multiple distinct remote speakers, a future optional diarization pass on the monitor stream could be added.
 
 3. **LLM context window growth**: As meetings get longer (1h+), the full transcript exceeds context windows. The progressive summary pattern mitigates this — the LLM sees summary + recent_window, not the full transcript.
 

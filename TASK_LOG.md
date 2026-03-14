@@ -98,10 +98,11 @@
   > Removed `enable_diarization` and `hf_token` from `config.py`. Removed `pyannote.audio>=3.1` from `pyproject.toml`. Cleaned `.env` and `.env.example` of diarization vars (they caused pydantic validation errors). Removed stale `cfg.enable_diarization = False` from `test_transcriber.py`. 286 tests pass (up from 244 — the prior 14 failures + 28 errors were all caused by the old env vars being rejected by pydantic).
 
 ### 1B.5 Update ARCHITECTURE.md
-- [ ] Update the Audio Capture section: replace "VAD → Whisper → Diarize" with "VAD → Whisper (per-stream)"
-- [ ] Update the ffmpeg command example to show two separate processes instead of amix
-- [ ] Add a note under Known Considerations replacing the diarization tradeoff with the dual-stream tradeoff (cannot distinguish multiple remote speakers)
-- [ ] Remove pyannote from the Python Dependencies list
+- [x] Update the Audio Capture section: replace "VAD → Whisper → Diarize" with "VAD → Whisper (per-stream)"
+- [x] Update the ffmpeg command example to show two separate processes instead of amix
+- [x] Add a note under Known Considerations replacing the diarization tradeoff with the dual-stream tradeoff (cannot distinguish multiple remote speakers)
+- [x] Remove pyannote from the Python Dependencies list
+  > Updated diagram label, ffmpeg example, pipeline docstring, data-flow step, config block, directory structure, Known Considerations item 2, project overview, and dependency list. All references to pyannote and diarization removed or updated throughout ARCHITECTURE.md.
 
 ---
 
