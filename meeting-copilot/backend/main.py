@@ -3,12 +3,15 @@ import datetime
 import json
 import logging
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
+import tempfile
+from pathlib import Path
 
 from backend.audio.pipeline import AudioPipeline
+from backend.audio.file_processor import FileAudioProcessor
 from backend.config import Settings
 from backend.reasoning.context_manager import ContextManager
 from backend.reasoning.dispatcher import LLMDispatcher
@@ -33,6 +36,7 @@ audio_manager = ConnectionManager()
 control_manager = ConnectionManager()
 audio_pipeline = AudioPipeline(settings)
 session_store = SessionStore(db_path=settings.db_path)
+file_processor = FileAudioProcessor(settings, session_store)
 
 
 @app.on_event("startup")
@@ -45,6 +49,13 @@ dispatcher = LLMDispatcher(settings)
 async def _broadcast_to_clients(data: dict) -> None:
     """Broadcast a dict payload as JSON to all connected control clients."""
     await control_manager.broadcast(json.dumps(data))
+
+
+async def _broadcast_error(message: str, *, context: str | None = None) -> None:
+    payload: dict[str, str] = {"type": "error", "message": message}
+    if context:
+        payload["context"] = context
+    await _broadcast_to_clients(payload)
 
 
 context_manager = ContextManager(
@@ -228,6 +239,64 @@ async def export_session(
     )
 
 
+# --- Audio File Processing ---
+
+@app.post("/sessions/{session_id}/upload-audio")
+async def upload_audio_file(
+    session_id: str,
+    file: UploadFile = File(...),
+    model: str = Query(default="turbo"),
+    language: str = Query(default="pt"),
+    enable_diarization: bool = Query(default=False)
+) -> dict:
+    """Upload and process an audio file for a session."""
+    
+    # Validate session exists
+    session_data = await session_store.load_session(session_id)
+    if session_data is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Validate file type
+    if not file.filename or not file.filename.lower().endswith(('.wav', '.mp3', '.m4a', '.flac')):
+        raise HTTPException(status_code=400, detail="Invalid audio file format")
+    
+    # Save uploaded file temporarily
+    with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as tmp_file:
+        content = await file.read()
+        tmp_file.write(content)
+        tmp_file_path = Path(tmp_file.name)
+    
+    try:
+        # Update settings for this processing
+        processing_settings = Settings()
+        processing_settings.whisper_model = model
+        processing_settings.language = language
+        processing_settings.enable_diarization = enable_diarization
+        
+        # Process file asynchronously
+        result = await file_processor.process_file(tmp_file_path, session_id)
+        
+        return {
+            "session_id": session_id,
+            "filename": file.filename,
+            "processing_result": result
+        }
+        
+    finally:
+        # Clean up temporary file
+        tmp_file_path.unlink(missing_ok=True)
+
+
+@app.get("/sessions/{session_id}/processing-status")
+async def get_processing_status(session_id: str) -> dict:
+    """Get processing status for a session (placeholder for future task tracking)."""
+    return {
+        "session_id": session_id,
+        "status": "completed",
+        "message": "Processing complete"
+    }
+
+
 @app.websocket("/ws/audio")
 async def ws_audio(websocket: WebSocket) -> None:
     """Receives raw PCM audio bytes from the browser."""
@@ -241,6 +310,13 @@ async def ws_audio(websocket: WebSocket) -> None:
                 await audio_pipeline.process_audio_chunk(data)
             except Exception as exc:
                 logger.error("Audio pipeline processing error: %s", exc)
+                try:
+                    await _broadcast_error(
+                        "Audio processing error — see backend logs for details",
+                        context="audio_pipeline",
+                    )
+                except Exception as broadcast_exc:  # pragma: no cover - defensive logging
+                    logger.error("Failed to broadcast audio error: %s", broadcast_exc)
     except WebSocketDisconnect:
         logger.info("Audio WebSocket disconnected")
     finally:

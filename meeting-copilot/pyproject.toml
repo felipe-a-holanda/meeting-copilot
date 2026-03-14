@@ -10,7 +10,7 @@ dependencies = [
     "pydantic-settings>=2.0",
     "httpx>=0.27",
     "faster-whisper>=1.0",
-    "whisperlivekit>=0.3",
+    "whisperlivekit>=0.2,<0.3",
     "pyannote.audio>=3.1",
     "silero-vad>=4.0",
     "anthropic>=0.40",
@@ -18,6 +18,8 @@ dependencies = [
     "numpy>=1.26",
     "torch>=2.0",
     "torchaudio>=2.0",
+    "soundfile>=0.12",
+    "pyaudio>=0.2.11",
 ]
 
 [project.optional-dependencies]
@@ -29,7 +31,7 @@ dev = [
 
 [build-system]
 requires = ["setuptools>=68"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
