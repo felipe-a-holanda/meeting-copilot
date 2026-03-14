@@ -1,29 +1,19 @@
-import React, { useState, useCallback } from 'react';
+import React, { useCallback } from 'react';
 import { AudioControls } from './components/AudioControls';
 import { TranscriptPanel } from './components/TranscriptPanel';
+import { CopilotPanel } from './components/CopilotPanel';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useAudioCapture } from './hooks/useAudioCapture';
-import { TranscriptSegment } from './types/messages';
+import { useMeetingState } from './hooks/useMeetingState';
 
 const AUDIO_WS_URL = process.env.REACT_APP_AUDIO_WS_URL || 'ws://localhost:8000/ws/audio';
 const CONTROL_WS_URL = process.env.REACT_APP_CONTROL_WS_URL || 'ws://localhost:8000/ws/control';
 
 function App() {
-  const [segments, setSegments] = useState<TranscriptSegment[]>([]);
-
-  const handleControlMessage = useCallback((event: MessageEvent) => {
-    try {
-      const msg = JSON.parse(event.data);
-      if (msg.type === 'transcript_segment') {
-        setSegments(prev => [...prev, msg as TranscriptSegment]);
-      }
-    } catch {
-      // ignore non-JSON messages
-    }
-  }, []);
+  const { state, handleMessage } = useMeetingState();
 
   const audioWs = useWebSocket(AUDIO_WS_URL);
-  const controlWs = useWebSocket(CONTROL_WS_URL, { onMessage: handleControlMessage });
+  const controlWs = useWebSocket(CONTROL_WS_URL, { onMessage: handleMessage });
 
   const { isCapturing, error, start: startCapture, stop: stopCapture } = useAudioCapture({
     onAudioChunk: useCallback((pcm: ArrayBuffer) => {
@@ -50,7 +40,7 @@ function App() {
         <p className="text-sm text-gray-400">Real-time AI meeting assistant</p>
       </header>
 
-      <main className="max-w-5xl mx-auto p-6 flex flex-col gap-6">
+      <main className="max-w-7xl mx-auto p-6 flex flex-col gap-6">
         <AudioControls
           isCapturing={isCapturing}
           wsStatus={audioWs.status}
@@ -59,8 +49,16 @@ function App() {
           onStop={handleStop}
         />
 
-        <div className="bg-gray-800 rounded-lg p-5 h-[60vh]">
-          <TranscriptPanel segments={segments} />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[70vh]">
+          <div className="bg-gray-800 rounded-lg p-5 min-h-0">
+            <TranscriptPanel segments={state.segments} />
+          </div>
+          <div className="bg-gray-800 rounded-lg p-5 min-h-0">
+            <CopilotPanel
+              summary={state.summary}
+              actionItems={state.actionItems}
+            />
+          </div>
         </div>
       </main>
     </div>

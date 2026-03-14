@@ -112,11 +112,13 @@
 > Done: BaseWorker ABC with abstract execute() method. SummaryWorker calls dispatcher with "summary" task, handles empty segments (returns current summary), replaces empty summary with placeholder for first run, strips whitespace. ActionItemWorker calls dispatcher with "action_items" task, parses JSON response (handles markdown code fences), creates new ActionItem objects with UUIDs, updates existing items' status, skips malformed entries, falls back to existing items on invalid JSON. ContextManager updated to use workers instead of calling dispatcher directly; _run_action_items now stores parsed ActionItem objects back into state. 16 new tests + 2 updated context_manager tests; 120 total pass (1 pre-existing fastapi import failure excluded).
 
 ### 3.4 Frontend — Copilot Panel
-- [ ] Create `frontend/src/hooks/useMeetingState.ts` — useReducer managing all message types from WebSocket
-- [ ] Create `frontend/src/components/CopilotPanel.tsx` — displays:
+- [x] Create `frontend/src/hooks/useMeetingState.ts` — useReducer managing all message types from WebSocket
+- [x] Create `frontend/src/components/CopilotPanel.tsx` — displays:
   - Progressive summary (updates in place)
   - Action items list (with assignee, status badges)
-- [ ] Update `App.tsx` — two-column layout: TranscriptPanel (left) + CopilotPanel (right)
+- [x] Update `App.tsx` — two-column layout: TranscriptPanel (left) + CopilotPanel (right)
+
+> Done: Created `useMeetingState.ts` with useReducer handling all 6 server message types (transcript_segment, summary_update, action_items_update, contradiction_alert, reply_suggestion, custom_prompt_result) plus reset action. Created `CopilotPanel.tsx` displaying progressive summary (updates in place) and action items list with color-coded status badges (new=blue, updated=yellow, completed=green) and assignee display. Updated `App.tsx` to use useMeetingState hook instead of manual useState, two-column responsive grid layout (single column on mobile, side-by-side on lg+), max-w-7xl container. `npm run build` compiles cleanly.
 
 ---
 
