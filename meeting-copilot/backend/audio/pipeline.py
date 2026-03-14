@@ -8,7 +8,6 @@ from typing import Awaitable, Callable
 
 import numpy as np
 
-from backend.audio.diarizer import SpeakerDiarizer
 from backend.audio.transcriber import WhisperTranscriber
 from backend.audio.vad import SileroVAD
 from backend.ws.protocol import TranscriptSegment
@@ -80,14 +79,6 @@ class AudioPipeline:
         self._callback: SegmentCallback | None = None
         self.stats = AudioPipelineStats()
 
-        # Diarization (optional — disabled if enable_diarization is False)
-        if getattr(config, "enable_diarization", False):
-            self._diarizer: SpeakerDiarizer | None = SpeakerDiarizer(
-                hf_token=getattr(config, "hf_token", "")
-            )
-        else:
-            self._diarizer = None
-
         # Rolling audio buffer — accumulates bytes until there is enough to transcribe
         self._buffer: np.ndarray = np.array([], dtype=_DTYPE)
         self._buffer_start_time: float = 0.0  # seconds from meeting start
@@ -101,20 +92,12 @@ class AudioPipeline:
         """Register an async callback that receives each finalised TranscriptSegment."""
         self._callback = callback
 
-    def set_diarization_enabled(self, enabled: bool) -> None:
-        """Enable or disable speaker diarization at runtime."""
-        if enabled and self._diarizer is None:
-            self._diarizer = SpeakerDiarizer(
-                hf_token=getattr(self.config, "hf_token", "")
-            )
-        elif not enabled:
-            self._diarizer = None
-
-    async def process_audio_chunk(self, chunk: bytes) -> None:
+    async def process_audio_chunk(self, chunk: bytes, speaker_label: str = "Speaker") -> None:
         """Feed a chunk of raw int16 PCM audio into the pipeline.
 
         Args:
             chunk: Raw PCM bytes — int16, mono, 16 kHz, little-endian.
+            speaker_label: Speaker label to assign to all segments from this chunk.
         """
         self.stats.chunks_received += 1
         self.stats.bytes_received += len(chunk)
@@ -130,12 +113,12 @@ class AudioPipeline:
         if len(self._buffer) < _MIN_CHUNK_SAMPLES:
             return
 
-        await self._process_buffer()
+        await self._process_buffer(speaker_label=speaker_label)
 
-    async def reset(self) -> None:
+    async def reset(self, speaker_label: str = "Speaker") -> None:
         """Flush the buffer and reset pipeline state (e.g. at meeting end)."""
         if len(self._buffer) > 0:
-            await self._process_buffer(force=True)
+            await self._process_buffer(force=True, speaker_label=speaker_label)
         self._buffer = np.array([], dtype=_DTYPE)
         self._meeting_start = None
 
@@ -148,7 +131,7 @@ class AudioPipeline:
             return 0.0
         return time.monotonic() - self._meeting_start
 
-    async def _process_buffer(self, force: bool = False) -> None:
+    async def _process_buffer(self, force: bool = False, speaker_label: str = "Speaker") -> None:
         """Run VAD + transcription on the accumulated buffer."""
         audio_int16 = self._buffer.copy()
         self._buffer = np.array([], dtype=_DTYPE)
@@ -189,27 +172,12 @@ class AudioPipeline:
         if not self._callback:
             return
 
-        # Diarize (optional) — run once per buffer on the same audio chunk
-        diarization: list = []
-        if self._diarizer is not None:
-            try:
-                diarization = self._diarizer.diarize(audio_f32, sample_rate=_SAMPLE_RATE)
-            except RuntimeError as exc:
-                logger.warning("Diarization failed, falling back to 'Speaker': %s", exc)
-
         for result in results:
             if not result.text:
                 continue
 
-            # Assign speaker label from diarization (mid-point of segment)
-            if diarization:
-                mid = (result.start + result.end) / 2.0
-                speaker = self._diarizer.get_speaker_at(diarization, mid)
-            else:
-                speaker = "Speaker"
-
             segment = TranscriptSegment(
-                speaker=speaker,
+                speaker=speaker_label,
                 text=result.text,
                 timestamp_start=chunk_start + result.start,
                 timestamp_end=chunk_start + result.end,

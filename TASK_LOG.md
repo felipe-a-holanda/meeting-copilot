@@ -63,12 +63,13 @@
 > and downloads ~500 MB of models — all unnecessary for the primary use case.
 
 ### 1B.1 Update AudioPipeline — Add speaker_label, Remove Diarization
-- [ ] Add `speaker_label: str = "Speaker"` parameter to `AudioPipeline.process_audio_chunk()`
-- [ ] In `_process_buffer()`, replace the diarization lookup block with `speaker = speaker_label` passed from the caller
-- [ ] Remove the `SpeakerDiarizer` import and `self._diarizer` field
-- [ ] Remove `set_diarization_enabled()` method
-- [ ] Remove the diarization block in `_process_buffer()` entirely
-- [ ] Write/update tests: verify `speaker_label` is forwarded to `TranscriptSegment`. Verify no diarizer is instantiated.
+- [x] Add `speaker_label: str = "Speaker"` parameter to `AudioPipeline.process_audio_chunk()`
+- [x] In `_process_buffer()`, replace the diarization lookup block with `speaker = speaker_label` passed from the caller
+- [x] Remove the `SpeakerDiarizer` import and `self._diarizer` field
+- [x] Remove `set_diarization_enabled()` method
+- [x] Remove the diarization block in `_process_buffer()` entirely
+- [x] Write/update tests: verify `speaker_label` is forwarded to `TranscriptSegment`. Verify no diarizer is instantiated.
+  > Removed diarizer import, `self._diarizer` field, and `set_diarization_enabled()` from `pipeline.py`. Added `speaker_label: str = "Speaker"` to `process_audio_chunk()`, `reset()`, and `_process_buffer()` — label passes straight through to each `TranscriptSegment`. Replaced `TestAudioPipelineDiarization` in `test_diarizer.py` with `TestAudioPipelineSpeakerLabel` (6 tests: default label, "Me", "Them", no diarizer attribute, multi-segment, no method). All 244 passing tests still pass; 3 pre-existing failures unchanged.
 
 ### 1B.2 Refactor AudioRecorder — Two Separate ffmpeg Processes
 - [ ] Replace the single `amix` ffmpeg command with two separate ffmpeg processes:

@@ -185,17 +185,15 @@ class TestSpeakerDiarizer:
 
 
 # ---------------------------------------------------------------------------
-# AudioPipeline + diarization integration tests
+# AudioPipeline speaker_label tests
 # ---------------------------------------------------------------------------
 
-class TestAudioPipelineDiarization:
+class TestAudioPipelineSpeakerLabel:
 
-    def _make_config(self, enable_diarization: bool = False):
+    def _make_config(self):
         cfg = MagicMock()
         cfg.whisper_model = "tiny"
         cfg.language = "pt"
-        cfg.enable_diarization = enable_diarization
-        cfg.hf_token = "fake-token"
         return cfg
 
     def _setup_pipeline(self, pipeline, transcript_text="Hello", start=0.0, end=1.5):
@@ -206,15 +204,12 @@ class TestAudioPipelineDiarization:
         ])
 
     @pytest.mark.asyncio
-    async def test_diarization_disabled_uses_speaker_fallback(self):
-        """When enable_diarization=False, speaker is always 'Speaker'."""
+    async def test_default_speaker_label_is_speaker(self):
+        """Without speaker_label arg, segments get 'Speaker'."""
         from backend.audio.pipeline import AudioPipeline
 
-        config = self._make_config(enable_diarization=False)
-        pipeline = AudioPipeline(config)
+        pipeline = AudioPipeline(self._make_config())
         self._setup_pipeline(pipeline)
-
-        assert pipeline._diarizer is None
 
         received = []
 
@@ -228,76 +223,31 @@ class TestAudioPipelineDiarization:
         assert received[0].speaker == "Speaker"
 
     @pytest.mark.asyncio
-    async def test_diarization_enabled_assigns_speaker_label(self):
-        """When enable_diarization=True, speaker label from diarizer is used."""
-        from backend.audio.pipeline import AudioPipeline
-        from backend.audio.diarizer import DiarizationResult
-
-        config = self._make_config(enable_diarization=True)
-        pipeline = AudioPipeline(config)
-        self._setup_pipeline(pipeline, start=0.0, end=1.5)
-
-        # Mock diarizer so no model is loaded
-        mock_diarizer = MagicMock()
-        mock_diarizer.diarize.return_value = [
-            DiarizationResult(speaker="SPEAKER_00", start=0.0, end=2.0)
-        ]
-        mock_diarizer.get_speaker_at.return_value = "SPEAKER_00"
-        pipeline._diarizer = mock_diarizer
-
-        received = []
-
-        async def callback(seg):
-            received.append(seg)
-
-        pipeline.on_segment(callback)
-        await pipeline.process_audio_chunk(make_pcm_bytes(duration_seconds=2.0))
-
-        assert len(received) == 1
-        assert received[0].speaker == "SPEAKER_00"
-        mock_diarizer.diarize.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_diarization_failure_falls_back_to_speaker(self):
-        """If diarizer raises RuntimeError, speaker defaults to 'Speaker'."""
+    async def test_speaker_label_me_forwarded(self):
+        """speaker_label='Me' is forwarded to TranscriptSegment."""
         from backend.audio.pipeline import AudioPipeline
 
-        config = self._make_config(enable_diarization=True)
-        pipeline = AudioPipeline(config)
+        pipeline = AudioPipeline(self._make_config())
         self._setup_pipeline(pipeline)
 
-        mock_diarizer = MagicMock()
-        mock_diarizer.diarize.side_effect = RuntimeError("torch not available")
-        pipeline._diarizer = mock_diarizer
-
         received = []
 
         async def callback(seg):
             received.append(seg)
 
         pipeline.on_segment(callback)
-        await pipeline.process_audio_chunk(make_pcm_bytes(duration_seconds=2.0))
+        await pipeline.process_audio_chunk(make_pcm_bytes(duration_seconds=2.0), speaker_label="Me")
 
         assert len(received) == 1
-        assert received[0].speaker == "Speaker"
+        assert received[0].speaker == "Me"
 
     @pytest.mark.asyncio
-    async def test_diarization_mid_point_used_for_speaker_lookup(self):
-        """Pipeline uses the mid-point of each transcript segment for speaker lookup."""
+    async def test_speaker_label_them_forwarded(self):
+        """speaker_label='Them' is forwarded to TranscriptSegment."""
         from backend.audio.pipeline import AudioPipeline
-        from backend.audio.diarizer import DiarizationResult
 
-        config = self._make_config(enable_diarization=True)
-        pipeline = AudioPipeline(config)
-        # Segment runs from 0.5 to 1.5; mid = 1.0
-        self._setup_pipeline(pipeline, start=0.5, end=1.5)
-
-        mock_diarizer = MagicMock()
-        mock_diarizer.diarize.return_value = [
-            DiarizationResult(speaker="SPEAKER_01", start=0.0, end=2.0)
-        ]
-        mock_diarizer.get_speaker_at.return_value = "SPEAKER_01"
-        pipeline._diarizer = mock_diarizer
+        pipeline = AudioPipeline(self._make_config())
+        self._setup_pipeline(pipeline)
 
         received = []
 
@@ -305,52 +255,48 @@ class TestAudioPipelineDiarization:
             received.append(seg)
 
         pipeline.on_segment(callback)
-        await pipeline.process_audio_chunk(make_pcm_bytes(duration_seconds=2.0))
+        await pipeline.process_audio_chunk(make_pcm_bytes(duration_seconds=2.0), speaker_label="Them")
 
         assert len(received) == 1
-        # Verify get_speaker_at was called with mid-point = (0.5 + 1.5) / 2 = 1.0
-        mock_diarizer.get_speaker_at.assert_called_once()
-        call_args = mock_diarizer.get_speaker_at.call_args
-        assert call_args[0][1] == pytest.approx(1.0)
+        assert received[0].speaker == "Them"
 
     @pytest.mark.asyncio
-    async def test_multiple_speakers_in_single_buffer(self):
-        """Multiple transcript segments in one buffer get correct speaker labels."""
+    async def test_no_diarizer_instantiated(self):
+        """AudioPipeline no longer instantiates a SpeakerDiarizer."""
+        from backend.audio.pipeline import AudioPipeline
+
+        pipeline = AudioPipeline(self._make_config())
+        assert not hasattr(pipeline, "_diarizer")
+
+    @pytest.mark.asyncio
+    async def test_multiple_segments_all_get_same_label(self):
+        """All transcript segments in a buffer get the same speaker_label."""
         from backend.audio.pipeline import AudioPipeline
         from backend.audio.transcriber import TranscriptionResult
-        from backend.audio.diarizer import DiarizationResult
 
-        config = self._make_config(enable_diarization=True)
-        pipeline = AudioPipeline(config)
+        pipeline = AudioPipeline(self._make_config())
         pipeline._vad.is_speech = MagicMock(return_value=True)
         pipeline._transcriber.transcribe = MagicMock(return_value=[
             TranscriptionResult(text="First sentence", start=0.0, end=1.0, language="pt"),
             TranscriptionResult(text="Second sentence", start=2.0, end=3.0, language="pt"),
         ])
 
-        results_00 = DiarizationResult(speaker="SPEAKER_00", start=0.0, end=1.5)
-        results_01 = DiarizationResult(speaker="SPEAKER_01", start=1.6, end=3.0)
-
-        mock_diarizer = MagicMock()
-        mock_diarizer.diarize.return_value = [results_00, results_01]
-
-        def _get_speaker_at(results, ts, fallback="Speaker"):
-            for r in results:
-                if r.start <= ts <= r.end:
-                    return r.speaker
-            return fallback
-
-        mock_diarizer.get_speaker_at.side_effect = _get_speaker_at
-        pipeline._diarizer = mock_diarizer
-
         received = []
 
         async def callback(seg):
             received.append(seg)
 
         pipeline.on_segment(callback)
-        await pipeline.process_audio_chunk(make_pcm_bytes(duration_seconds=4.0))
+        await pipeline.process_audio_chunk(make_pcm_bytes(duration_seconds=4.0), speaker_label="Them")
 
         assert len(received) == 2
-        assert received[0].speaker == "SPEAKER_00"  # mid=0.5 → SPEAKER_00
-        assert received[1].speaker == "SPEAKER_01"  # mid=2.5 → SPEAKER_01
+        assert received[0].speaker == "Them"
+        assert received[1].speaker == "Them"
+
+    @pytest.mark.asyncio
+    async def test_set_diarization_enabled_not_present(self):
+        """set_diarization_enabled() method has been removed."""
+        from backend.audio.pipeline import AudioPipeline
+
+        pipeline = AudioPipeline(self._make_config())
+        assert not hasattr(pipeline, "set_diarization_enabled")
