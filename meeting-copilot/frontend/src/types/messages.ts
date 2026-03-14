@@ -81,3 +81,23 @@ export type ServerMessage =
 
 // Union type for all client → server messages
 export type ClientMessage = RequestReplySuggestion | CustomPromptRequest;
+
+// === Session / Storage types ===
+
+export interface SessionListItem {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  segment_count: number;
+}
+
+export interface SessionData {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  segments: TranscriptSegment[];
+  summary: string;
+  action_items: ActionItem[];
+}

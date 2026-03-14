@@ -172,11 +172,13 @@
 > Done: Added `GET /sessions/{id}/export?format=markdown|json` endpoint to main.py. `_format_timestamp()` converts float seconds to HH:MM:SS. `_export_markdown()` renders title, date, summary (with placeholder if empty), action items with checkboxes (checked for completed), assignees, and full transcript with speaker labels and timestamps. JSON format returns pretty-printed JSON via PlainTextResponse with application/json content-type. Both return 404 for unknown sessions; invalid format triggers 422. 17 new tests; 192 total pass.
 
 ### 5.3 Frontend Polish
-- [ ] Add settings panel: toggle diarization, select Whisper model size, toggle API fallback
-- [ ] Add session list sidebar: browse and load past meetings
-- [ ] Add responsive layout (mobile-friendly)
-- [ ] Add dark mode support via Tailwind
-- [ ] Connection status indicator (WebSocket connected/disconnected/reconnecting)
+- [x] Add settings panel: toggle diarization, select Whisper model size, toggle API fallback
+- [x] Add session list sidebar: browse and load past meetings
+- [x] Add responsive layout (mobile-friendly)
+- [x] Add dark mode support via Tailwind
+- [x] Connection status indicator (WebSocket connected/disconnected/reconnecting)
+
+> Done: SettingsPanel.tsx — right-side drawer with toggle switches (diarization, API fallback) and model size select; saves to localStorage + POSTs to /settings. SessionSidebar.tsx — left-side drawer fetching GET /sessions, renders session list with dates/segment counts, loads session via GET /sessions/{id} and dispatches load_session action to useMeetingState. useMeetingState: added load_session reducer case + loadSession callback. types/messages.ts: added SessionListItem and SessionData interfaces. darkMode: 'class' added to tailwind.config.js; App.tsx manages dark class on <html> with localStorage persistence and sun/moon SVG toggle button. Connection status: dedicated ConnectionDot component in App header showing audio + control WS status with animated pulse for connecting state; also shown in mobile status bar below header. Responsive: sticky header with sm: breakpoints, main grid uses lg:grid-cols-2 (single column on mobile), panels have sm:p-5 padding. Backend: added GET /settings and POST /settings endpoints with SettingsUpdate model; AudioPipeline.set_diarization_enabled() added for runtime toggle. Build: 67.33 kB JS. 192 backend tests pass.
 
 ### 5.4 Error Handling & Resilience
 - [ ] Backend: graceful WebSocket disconnection handling

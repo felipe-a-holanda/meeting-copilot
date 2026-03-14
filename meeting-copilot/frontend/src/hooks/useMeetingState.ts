@@ -7,6 +7,7 @@ import {
   ContradictionAlert,
   ReplySuggestion,
   CustomPromptResult,
+  SessionData,
 } from '../types/messages';
 
 export interface MeetingState {
@@ -26,6 +27,7 @@ type MeetingAction =
   | { type: 'contradiction_alert'; payload: ContradictionAlert }
   | { type: 'reply_suggestion'; payload: ReplySuggestion }
   | { type: 'custom_prompt_result'; payload: CustomPromptResult }
+  | { type: 'load_session'; payload: SessionData }
   | { type: 'reset' };
 
 const initialState: MeetingState = {
@@ -63,6 +65,14 @@ function meetingReducer(state: MeetingState, action: MeetingAction): MeetingStat
       return {
         ...state,
         customPromptResults: [...state.customPromptResults, action.payload],
+      };
+
+    case 'load_session':
+      return {
+        ...initialState,
+        segments: action.payload.segments,
+        summary: action.payload.summary,
+        actionItems: action.payload.action_items,
       };
 
     case 'reset':
@@ -106,5 +116,9 @@ export function useMeetingState() {
 
   const reset = useCallback(() => dispatch({ type: 'reset' }), []);
 
-  return { state, handleMessage, reset };
+  const loadSession = useCallback((session: SessionData) => {
+    dispatch({ type: 'load_session', payload: session });
+  }, []);
+
+  return { state, handleMessage, reset, loadSession };
 }

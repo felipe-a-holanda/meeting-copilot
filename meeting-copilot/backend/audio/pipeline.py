@@ -70,6 +70,15 @@ class AudioPipeline:
         """Register an async callback that receives each finalised TranscriptSegment."""
         self._callback = callback
 
+    def set_diarization_enabled(self, enabled: bool) -> None:
+        """Enable or disable speaker diarization at runtime."""
+        if enabled and self._diarizer is None:
+            self._diarizer = SpeakerDiarizer(
+                hf_token=getattr(self.config, "hf_token", "")
+            )
+        elif not enabled:
+            self._diarizer = None
+
     async def process_audio_chunk(self, chunk: bytes) -> None:
         """Feed a chunk of raw int16 PCM audio into the pipeline.
 

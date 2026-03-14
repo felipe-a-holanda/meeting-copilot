@@ -60,6 +60,44 @@ class CreateSessionRequest(BaseModel):
     title: str = ""
 
 
+class SettingsUpdate(BaseModel):
+    enable_diarization: bool | None = None
+    whisper_model_size: str | None = None
+    use_claude_api_fallback: bool | None = None
+
+
+# Runtime-overridable settings (supplement the env-based Settings)
+_runtime_settings: dict = {}
+
+
+@app.get("/settings")
+async def get_settings() -> dict:
+    return {
+        "enable_diarization": _runtime_settings.get(
+            "enable_diarization", settings.enable_diarization
+        ),
+        "whisper_model_size": _runtime_settings.get(
+            "whisper_model_size", settings.whisper_model_size
+        ),
+        "use_claude_api_fallback": _runtime_settings.get(
+            "use_claude_api_fallback", settings.use_claude_api_fallback
+        ),
+    }
+
+
+@app.post("/settings")
+async def update_settings(body: SettingsUpdate) -> dict:
+    if body.enable_diarization is not None:
+        _runtime_settings["enable_diarization"] = body.enable_diarization
+        audio_pipeline.set_diarization_enabled(body.enable_diarization)
+    if body.whisper_model_size is not None:
+        _runtime_settings["whisper_model_size"] = body.whisper_model_size
+    if body.use_claude_api_fallback is not None:
+        _runtime_settings["use_claude_api_fallback"] = body.use_claude_api_fallback
+        dispatcher.use_api_fallback = body.use_claude_api_fallback
+    return {"status": "ok", **_runtime_settings}
+
+
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
