@@ -237,7 +237,10 @@ async def ws_audio(websocket: WebSocket) -> None:
         while True:
             data = await websocket.receive_bytes()
             logger.debug("Received %d audio bytes", len(data))
-            await audio_pipeline.process_audio_chunk(data)
+            try:
+                await audio_pipeline.process_audio_chunk(data)
+            except Exception as exc:
+                logger.error("Audio pipeline processing error: %s", exc)
     except WebSocketDisconnect:
         logger.info("Audio WebSocket disconnected")
     finally:
@@ -271,6 +274,8 @@ async def ws_control(websocket: WebSocket) -> None:
                     logger.warning("Unknown control message type: %s", msg_type)
             except (json.JSONDecodeError, ValueError) as exc:
                 logger.error("Invalid control message: %s", exc)
+            except Exception as exc:
+                logger.error("Unexpected error processing control message: %s", exc)
     except WebSocketDisconnect:
         logger.info("Control WebSocket disconnected")
     finally:

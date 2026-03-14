@@ -1,5 +1,6 @@
 """LLM Dispatcher — routes reasoning tasks to Ollama (local) or Claude API (remote)."""
 
+import asyncio
 import logging
 
 import httpx
@@ -90,12 +91,32 @@ class LLMDispatcher:
             return response.json()["response"]
 
     async def _call_claude(self, prompt: str) -> str:
-        """Call the Anthropic Claude API."""
+        """Call the Anthropic Claude API with exponential backoff on rate limits."""
         if self._anthropic_client is None:
             raise RuntimeError("Anthropic client not initialised")
-        response = await self._anthropic_client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1024,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response.content[0].text
+
+        max_retries = 3
+        delay = 1.0
+        for attempt in range(max_retries):
+            try:
+                response = await self._anthropic_client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=1024,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                return response.content[0].text
+            except Exception as exc:
+                exc_str = str(exc).lower()
+                status = getattr(exc, "status_code", None)
+                is_rate_limit = status == 429 or "rate_limit" in exc_str or "429" in exc_str
+                if is_rate_limit and attempt < max_retries - 1:
+                    logger.warning(
+                        "Claude API rate limit (attempt %d/%d), retrying in %.1fs",
+                        attempt + 1,
+                        max_retries,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                    delay *= 2
+                else:
+                    raise

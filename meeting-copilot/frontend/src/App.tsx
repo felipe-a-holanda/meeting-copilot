@@ -6,6 +6,7 @@ import { PromptInput } from './components/PromptInput';
 import { ReplyPanel } from './components/ReplyPanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { SessionSidebar } from './components/SessionSidebar';
+import { ErrorToast, Toast } from './components/ErrorToast';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useAudioCapture } from './hooks/useAudioCapture';
 import { useMeetingState } from './hooks/useMeetingState';
@@ -30,6 +31,16 @@ function App() {
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('theme') !== 'light');
   const [showSettings, setShowSettings] = useState(false);
   const [showSessions, setShowSessions] = useState(false);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const addToast = useCallback((message: string, type: Toast['type'] = 'error') => {
+    const id = `${Date.now()}-${Math.random()}`;
+    setToasts(prev => [...prev, { id, message, type }]);
+  }, []);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
 
   // Apply / remove `dark` class on the root element
   useEffect(() => {
@@ -42,8 +53,21 @@ function App() {
     localStorage.setItem('theme', darkMode ? 'dark' : 'light');
   }, [darkMode]);
 
+  const handleControlMessage = useCallback((event: MessageEvent) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.type === 'error') {
+        addToast(data.message || 'An error occurred', 'error');
+        return;
+      }
+    } catch {
+      // ignore parse errors
+    }
+    handleMessage(event);
+  }, [handleMessage, addToast]);
+
   const audioWs = useWebSocket(AUDIO_WS_URL);
-  const controlWs = useWebSocket(CONTROL_WS_URL, { onMessage: handleMessage });
+  const controlWs = useWebSocket(CONTROL_WS_URL, { onMessage: handleControlMessage });
 
   const { isCapturing, error, start: startCapture, stop: stopCapture } = useAudioCapture({
     onAudioChunk: useCallback(
@@ -53,6 +77,10 @@ function App() {
       [audioWs]
     ),
   });
+
+  useEffect(() => {
+    if (error) addToast(error, 'error');
+  }, [error, addToast]);
 
   const handleStart = useCallback(async () => {
     audioWs.start();
@@ -89,6 +117,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-200">
+      <ErrorToast toasts={toasts} onDismiss={dismissToast} />
       {/* Overlays */}
       <SettingsPanel open={showSettings} onClose={() => setShowSettings(false)} />
       <SessionSidebar
