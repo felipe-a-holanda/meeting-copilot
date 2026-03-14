@@ -24,9 +24,11 @@
 > Done: All 8 message models implemented with Literal type discriminators. ConnectionManager handles connect/disconnect/broadcast with dead-connection cleanup. 25 tests pass covering serialization, JSON round-trips, default values, and validation errors.
 
 ### 1.3 FastAPI Skeleton
-- [ ] Create `backend/main.py` with FastAPI app, both WebSocket endpoints (`/ws/audio`, `/ws/control`), and CORS middleware
-- [ ] Verify server starts: `uvicorn backend.main:app --reload` runs without errors
-- [ ] Create a simple health check endpoint `GET /health` that returns `{"status": "ok"}`
+- [x] Create `backend/main.py` with FastAPI app, both WebSocket endpoints (`/ws/audio`, `/ws/control`), and CORS middleware
+- [x] Verify server starts: `uvicorn backend.main:app --reload` runs without errors
+- [x] Create a simple health check endpoint `GET /health` that returns `{"status": "ok"}`
+
+> Done: Created backend/main.py with FastAPI app, CORS middleware (allow_origins=["*"]), /health returning {"status":"ok"}, /ws/audio receiving raw PCM bytes, /ws/control parsing RequestReplySuggestion and CustomPromptRequest messages. Server starts cleanly with uvicorn and health check confirmed via curl.
 
 ### 1.4 Audio Pipeline — Transcription
 - [ ] Create `backend/audio/__init__.py`
