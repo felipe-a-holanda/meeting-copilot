@@ -26,67 +26,72 @@ A real-time meeting copilot that transcribes, diarizes, summarizes, extracts act
 │                                                             │
 │  ┌──────────┐  ┌──────────────┐  ┌────────────────────────┐│
 │  │ Audio    │  │ Live         │  │ Copilot Panel          ││
-│  │ Capture  │  │ Transcript   │  │ - Summary              ││
-│  │ (WebAudio│  │ Panel        │  │ - Action Items         ││
+│  │ Controls │  │ Transcript   │  │ - Summary              ││
+│  │ (REST    │  │ Panel        │  │ - Action Items         ││
 │  │  API)    │  │ (per-speaker)│  │ - Contradictions       ││
 │  └────┬─────┘  └──────▲───────┘  │ - Reply Suggestions    ││
 │       │               │          │ - Custom Prompt Input   ││
-│       │ audio chunks  │ segments └────────────▲────────────┘│
-│       │ (WebSocket)   │ (WebSocket)           │ (WebSocket) │
+│       │ REST calls    │ segments └────────────▲────────────┘│
+│       │               │ (WebSocket)           │ (WebSocket) │
 └───────┼───────────────┼───────────────────────┼─────────────┘
         │               │                       │
         ▼               │                       │
 ┌───────────────────────┴───────────────────────┴─────────────┐
 │                     BACKEND (FastAPI)                        │
 │                                                             │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │              WebSocket Gateway                       │    │
-│  │  - Receives audio chunks from frontend               │    │
-│  │  - Broadcasts transcription segments to frontend     │    │
-│  │  - Broadcasts reasoning outputs to frontend          │    │
-│  └──────────┬──────────────────────────────┬────────────┘    │
-│             │                              │                 │
-│             ▼                              ▼                 │
-│  ┌──────────────────────┐    ┌──────────────────────────┐   │
-│  │  AUDIO PIPELINE      │    │  REASONING ENGINE         │   │
-│  │                      │    │                            │   │
-│  │  WhisperLiveKit      │    │  Context Manager           │   │
-│  │  ├─ faster-whisper   │───▶│  ├─ Accumulates segments   │   │
-│  │  ├─ VAD (Silero)     │    │  ├─ Maintains meeting state│   │
-│  │  └─ Diarization      │    │  └─ Triggers LLM tasks     │   │
-│  │     (pyannote)       │    │                            │   │
-│  │                      │    │  LLM Dispatcher             │   │
-│  │  Output:             │    │  ├─ Ollama (local)          │   │
-│  │  {speaker, text,     │    │  └─ Claude API (fallback)   │   │
-│  │   timestamp, lang}   │    │                            │   │
-│  └──────────────────────┘    │  Task Workers:              │   │
-│                              │  ├─ SummaryWorker           │   │
-│                              │  ├─ ActionItemWorker        │   │
-│                              │  ├─ ContradictionWorker     │   │
-│                              │  ├─ ReplyWorker             │   │
-│                              │  └─ CustomPromptWorker      │   │
-│                              └──────────────────────────┘   │
+│  ┌──────────────────────────────────────────────────┐       │
+│  │  Audio Capture (dual mode)                        │       │
+│  │                                                   │       │
+│  │  Mode A: Backend (primary)                        │       │
+│  │  ┌─────────────────────────────────────────────┐ │       │
+│  │  │ AudioRecorder (ffmpeg + PulseAudio)          │ │       │
+│  │  │  ├─ mic source                               │ │       │
+│  │  │  └─ sink.monitor (system audio)              │ │       │
+│  │  │  → REST: /api/recording/start|stop|status    │ │       │
+│  │  └─────────────────────────────────────────────┘ │       │
+│  │                                                   │       │
+│  │  Mode B: Browser (fallback)                       │       │
+│  │  ┌─────────────────────────────────────────────┐ │       │
+│  │  │ WebSocket /ws/audio ← browser getUserMedia   │ │       │
+│  │  │ (mic only, no system audio)                  │ │       │
+│  │  └─────────────────────────────────────────────┘ │       │
+│  └───────────────────────┬──────────────────────────┘       │
+│                          ▼                                   │
+│  ┌──────────────────────────────────┐                       │
+│  │     AudioPipeline                 │                       │
+│  │  VAD (Silero) → Whisper → Diarize │                       │
+│  └──────────────┬───────────────────┘                       │
+│                 ▼                                            │
+│  ┌──────────────────────────────────┐                       │
+│  │     ContextManager                │                       │
+│  │  MeetingState accumulation        │                       │
+│  │  + Trigger-based LLM workers      │                       │
+│  └──────────────┬───────────────────┘                       │
+│                 ▼                                            │
+│  ┌──────────────────────────────────┐                       │
+│  │     LLM Dispatcher                │                       │
+│  │  Ollama (local) │ Claude API      │                       │
+│  └──────────────────────────────────┘                       │
+│                                                             │
+│  ┌──────────────────────────────────┐                       │
+│  │     Storage (SQLite)              │                       │
+│  │  Sessions, segments, state        │                       │
+│  └──────────────────────────────────┘                       │
 └─────────────────────────────────────────────────────────────┘
-        │                              │
-        ▼                              ▼
-┌────────────────┐          ┌────────────────────┐
-│  faster-whisper│          │  Ollama (local)     │
-│  (local model) │          │  └─ llama3.1:8b     │
-│  └─ large-v3  │          │  └─ llama3.1:70b    │
-└────────────────┘          │  OR                 │
-                            │  Claude API         │
-                            │  (remote fallback)  │
-                            └────────────────────┘
 ```
 
-### Data Flow
+### Audio Capture Modes
 
-1. **Frontend** captures audio via WebAudio API → sends PCM chunks over WebSocket
-2. **Audio Pipeline** receives chunks → runs VAD → transcribes with Whisper → diarizes
-3. **Audio Pipeline** emits `TranscriptSegment` events to **Context Manager**
-4. **Context Manager** appends to meeting state → evaluates trigger conditions → dispatches LLM tasks
-5. **Task Workers** run LLM inference (local or API) → emit results back through WebSocket
-6. **Frontend** receives and renders all outputs in real-time
+The system supports two audio capture modes, configured via `audio_capture_mode`:
+
+| Mode | Source | Captures System Audio | Requires |
+|------|--------|-----------------------|----------|
+| `backend` (primary) | PulseAudio via ffmpeg | Yes (mic + system) | Linux, PulseAudio, ffmpeg |
+| `browser` (fallback) | `getUserMedia()` via WebSocket | No (mic only) | Modern browser |
+
+**Backend mode** is preferred because it captures both the user's microphone and system audio (the other side of the meeting from Zoom, Meet, Teams, etc.) using PulseAudio monitor sources.
+
+**Browser mode** is kept for backward compatibility and environments where PulseAudio is unavailable.
 
 ---
 
@@ -96,18 +101,21 @@ A real-time meeting copilot that transcribes, diarizes, summarizes, extracts act
 meeting-copilot/
 ├── README.md
 ├── pyproject.toml
-├── docker-compose.yml              # Ollama + app (optional)
+├── docker-compose.yml
 │
 ├── backend/
-│   ├── main.py                     # FastAPI app entry point
-│   ├── config.py                   # Settings (models, thresholds, API keys)
+│   ├── main.py                     # FastAPI app entry point + all routes
+│   ├── config.py                   # Settings (models, thresholds, API keys, audio capture)
+│   ├── cli.py                      # Standalone CLI for testing pipeline against audio files
 │   │
 │   ├── audio/
 │   │   ├── __init__.py
-│   │   ├── pipeline.py             # WhisperLiveKit integration
+│   │   ├── pipeline.py             # AudioPipeline: VAD → Whisper → diarization → segments
 │   │   ├── vad.py                  # Voice Activity Detection (Silero)
-│   │   ├── transcriber.py          # faster-whisper streaming wrapper
-│   │   └── diarizer.py             # pyannote speaker diarization
+│   │   ├── transcriber.py          # faster-whisper wrapper
+│   │   ├── diarizer.py             # pyannote speaker diarization
+│   │   ├── recorder.py             # AudioRecorder: ffmpeg + PulseAudio backend capture
+│   │   └── file_processor.py       # Batch processing of uploaded audio files
 │   │
 │   ├── reasoning/
 │   │   ├── __init__.py
@@ -130,29 +138,35 @@ meeting-copilot/
 │   │
 │   └── storage/
 │       ├── __init__.py
-│       └── session.py              # Meeting session persistence (SQLite)
+│       └── session.py              # Session persistence (SQLite via aiosqlite)
 │
 ├── frontend/
 │   ├── package.json
 │   ├── src/
-│   │   ├── App.tsx
+│   │   ├── App.tsx                 # Root component, WebSocket connections, state
 │   │   ├── hooks/
-│   │   │   ├── useAudioCapture.ts  # WebAudio API + PCM encoding
-│   │   │   ├── useWebSocket.ts     # WS connection + reconnection
-│   │   │   └── useMeetingState.ts  # Frontend state management
+│   │   │   ├── useAudioCapture.ts  # Browser mic capture (getUserMedia + PCM)
+│   │   │   ├── useWebSocket.ts     # WS connection with auto-reconnect
+│   │   │   └── useMeetingState.ts  # Reducer-based meeting state management
 │   │   ├── components/
-│   │   │   ├── TranscriptPanel.tsx  # Live transcript with speaker labels
+│   │   │   ├── AudioControls.tsx   # Start/stop recording, connection status
+│   │   │   ├── TranscriptPanel.tsx # Live transcript with speaker labels
 │   │   │   ├── CopilotPanel.tsx    # Summary + actions + alerts
 │   │   │   ├── ReplyPanel.tsx      # Reply suggestions
 │   │   │   ├── PromptInput.tsx     # Custom prompt input
-│   │   │   └── AudioControls.tsx   # Start/stop/settings
-│   │   └── types/
-│   │       └── messages.ts         # Shared message type definitions
+│   │   │   ├── SessionSidebar.tsx  # Past sessions list
+│   │   │   ├── SettingsPanel.tsx   # Settings overlay
+│   │   │   ├── DebugPanel.tsx      # Live debug overlay (WS stats, chunks)
+│   │   │   └── ErrorToast.tsx      # Toast notification system
+│   │   ├── types/
+│   │   │   └── messages.ts         # TS interfaces mirroring backend protocol
+│   │   └── utils/
+│   │       └── speakerColors.ts    # Speaker → color mapping
 │   │
 │   └── tailwind.config.js
 │
 └── scripts/
-    ├── setup.sh                    # Install dependencies + download models
+    ├── setup.sh                    # Install deps + download models
     └── download_models.sh          # Pre-download Whisper + pyannote models
 ```
 
@@ -223,11 +237,11 @@ class CustomPromptResult(BaseModel):
 
 class RequestReplySuggestion(BaseModel):
     type: Literal["request_reply"] = "request_reply"
-    context_hint: Optional[str] = None  # Optional user hint
+    context_hint: Optional[str] = None
 
 class CustomPromptRequest(BaseModel):
     type: Literal["custom_prompt"] = "custom_prompt"
-    prompt: str                     # User's custom prompt
+    prompt: str
 ```
 
 ### Meeting State (Context Manager)
@@ -242,23 +256,13 @@ class MeetingState:
     """Accumulated state of the meeting, fed to LLM workers."""
     session_id: str
     start_time: float
-    
-    # Raw transcript segments (full history)
+
     segments: list[TranscriptSegment] = field(default_factory=list)
-    
-    # Identified speakers
     speakers: set[str] = field(default_factory=set)
-    
-    # Current progressive summary
     current_summary: str = ""
-    
-    # Running action items
     action_items: list[ActionItem] = field(default_factory=list)
-    
-    # Recent segments window (for contradiction detection, reply suggestions)
     recent_window: deque = field(default_factory=lambda: deque(maxlen=50))
-    
-    # Counters for trigger logic
+
     segments_since_last_summary: int = 0
     segments_since_last_action_scan: int = 0
 
@@ -270,7 +274,6 @@ class MeetingState:
         self.segments_since_last_action_scan += 1
 
     def get_transcript_text(self, last_n: int = None) -> str:
-        """Returns formatted transcript for LLM context."""
         source = list(self.recent_window) if last_n else self.segments
         if last_n:
             source = source[-last_n:]
@@ -280,7 +283,6 @@ class MeetingState:
         )
 
     def get_full_context(self) -> str:
-        """Returns complete context string for LLM prompts."""
         parts = []
         if self.current_summary:
             parts.append(f"## Summary So Far\n{self.current_summary}")
@@ -290,6 +292,99 @@ class MeetingState:
         parts.append(f"## Recent Transcript\n{self.get_transcript_text(last_n=30)}")
         return "\n\n".join(parts)
 ```
+
+---
+
+## Audio Capture
+
+### Backend Capture: AudioRecorder
+
+The primary audio capture method. Uses PulseAudio + ffmpeg to capture both microphone and system audio on the server side.
+
+**Location**: `backend/audio/recorder.py`
+
+**Responsibilities**:
+1. Discover PulseAudio devices via `pactl`
+2. Launch ffmpeg subprocess capturing mic + system monitor, pipe PCM to stdout
+3. Feed PCM chunks to `AudioPipeline.process_audio_chunk()` in an asyncio loop
+4. Stop recording (SIGINT to ffmpeg, graceful shutdown)
+5. Optionally save mixed audio to a WAV file
+
+```python
+class AudioRecorder:
+    """Captures mic + system audio via PulseAudio/ffmpeg and feeds the pipeline."""
+
+    def __init__(self, pipeline: AudioPipeline, config: Settings): ...
+    async def list_devices(self) -> dict: ...
+    async def start(
+        self,
+        mic_source: str | None = None,
+        monitor_source: str | None = None,
+        save_to_file: Path | None = None,
+        mic_volume: float = 2.0,
+    ) -> None: ...
+    async def stop(self) -> dict: ...
+    @property
+    def is_recording(self) -> bool: ...
+```
+
+**ffmpeg command** (from proven `record_audio.sh`):
+
+```bash
+ffmpeg \
+  -f pulse -i <mic_source> \
+  -f pulse -i <monitor_source> \
+  -filter_complex '[0:a]volume=2.0[mic];[1:a][mic]amix=inputs=2:duration=longest:normalize=0' \
+  -ar 16000 -ac 1 -f s16le \
+  pipe:1
+```
+
+Output: raw int16 PCM to stdout — exactly what `AudioPipeline.process_audio_chunk()` expects.
+
+### Browser Capture (Fallback)
+
+The frontend hook `useAudioCapture.ts` uses `navigator.mediaDevices.getUserMedia()` to capture microphone audio, converts float32 to int16 PCM via `ScriptProcessorNode`, and streams binary chunks over the `/ws/audio` WebSocket.
+
+Limitations: mic only (no system audio), depends on browser tab staying open.
+
+---
+
+## REST API Endpoints
+
+### Recording Control (backend capture mode)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/audio/devices` | List PulseAudio sources and sinks |
+| `POST` | `/api/recording/start` | Start recording (creates session, launches ffmpeg) |
+| `POST` | `/api/recording/stop` | Stop recording (flushes pipeline, finalizes session) |
+| `GET` | `/api/recording/status` | Current recording state |
+
+### Sessions
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/sessions` | Create a new session |
+| `GET` | `/sessions` | List all sessions |
+| `GET` | `/sessions/{id}` | Get session details |
+| `GET` | `/sessions/{id}/export` | Export session (markdown/JSON) |
+| `POST` | `/sessions/{id}/upload-audio` | Upload audio file for batch processing |
+
+### Other
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Health check |
+| `GET` | `/debug` | Debug info (WS stats, chunk counts) |
+| `GET` | `/settings` | Get current settings |
+| `POST` | `/settings` | Update settings |
+
+### WebSocket Endpoints
+
+| Path | Direction | Format | Description |
+|------|-----------|--------|-------------|
+| `/ws/audio` | Client → Server | Binary (int16 PCM) | Browser audio streaming (fallback mode) |
+| `/ws/control` | Bidirectional | JSON | Transcript/insights broadcast + user commands |
 
 ---
 
@@ -412,383 +507,101 @@ Respond helpfully based on the meeting context. Be concise and actionable."""
 
 ## Key Implementation Details
 
-### 1. Audio Pipeline (WhisperLiveKit Integration)
+### 1. Audio Pipeline
 
 ```python
 # backend/audio/pipeline.py
-import asyncio
-from whisperlivekit import WhisperLiveKit, TranscriptionConfig
-
 class AudioPipeline:
-    """Wraps WhisperLiveKit for streaming transcription + diarization."""
-    
-    def __init__(self, config):
-        self.config = config
-        self.kit = WhisperLiveKit(
-            model_size=config.whisper_model,       # "large-v3"
-            backend="faster-whisper",
-            language=config.language,               # "pt" or None for auto
-            diarization=config.enable_diarization,  # True
-        )
-        self._segment_callback = None
-    
-    def on_segment(self, callback):
-        """Register callback for new transcript segments."""
-        self._segment_callback = callback
-    
+    """VAD → Whisper → Diarization pipeline. Accepts raw int16 PCM bytes."""
+
+    def __init__(self, config): ...
+    def on_segment(self, callback): ...
     async def process_audio_chunk(self, chunk: bytes):
-        """Feed raw PCM audio data into the pipeline."""
-        results = await self.kit.process(chunk)
-        for result in results:
-            if self._segment_callback and not result.is_partial:
-                segment = TranscriptSegment(
-                    speaker=result.speaker or "Unknown",
-                    text=result.text,
-                    timestamp_start=result.start,
-                    timestamp_end=result.end,
-                    language=result.language or self.config.language,
-                    is_partial=result.is_partial,
-                )
-                await self._segment_callback(segment)
+        """Feed raw PCM audio data. Buffers until 1s of audio, then:
+        1. Run Silero VAD — discard if no speech
+        2. Transcribe via faster-whisper
+        3. (Optional) Diarize via pyannote
+        4. Emit TranscriptSegment via callback
+        """
 ```
 
 ### 2. Context Manager (Trigger Logic)
 
-```python
-# backend/reasoning/context_manager.py
-import asyncio
-from .dispatcher import LLMDispatcher
+Accumulates `MeetingState` and fires LLM workers based on thresholds:
 
-class ContextManager:
-    """Manages meeting state and triggers reasoning tasks."""
-    
-    # Trigger thresholds
-    SUMMARY_EVERY_N_SEGMENTS = 10       # Summarize every 10 new segments
-    ACTION_SCAN_EVERY_N_SEGMENTS = 5    # Scan for actions every 5 segments
-    CONTRADICTION_CHECK_SECONDS = 120   # Check contradictions every 2 minutes
-    
-    def __init__(self, dispatcher: LLMDispatcher, broadcast_fn):
-        self.state = MeetingState(session_id="", start_time=0)
-        self.dispatcher = dispatcher
-        self.broadcast = broadcast_fn   # async fn to send WS messages
-        self._running_tasks: set[asyncio.Task] = set()
-    
-    async def on_new_segment(self, segment: TranscriptSegment):
-        """Called by AudioPipeline when a new segment is finalized."""
-        self.state.add_segment(segment)
-        
-        # Broadcast raw transcript to frontend
-        await self.broadcast(segment.model_dump())
-        
-        # Check triggers (non-blocking — fire and forget)
-        if self.state.segments_since_last_summary >= self.SUMMARY_EVERY_N_SEGMENTS:
-            self._fire_task(self._run_summary())
-            self.state.segments_since_last_summary = 0
-        
-        if self.state.segments_since_last_action_scan >= self.ACTION_SCAN_EVERY_N_SEGMENTS:
-            self._fire_task(self._run_action_items())
-            self.state.segments_since_last_action_scan = 0
-        
-        # Contradiction detection runs on a time-based trigger (see _contradiction_loop)
-    
-    async def handle_custom_prompt(self, prompt: str):
-        """Handle user's custom prompt against meeting context."""
-        result = await self.dispatcher.run(
-            "custom",
-            full_context=self.state.get_full_context(),
-            user_prompt=prompt,
-        )
-        await self.broadcast(CustomPromptResult(
-            prompt=prompt,
-            result=result,
-            timestamp=self.state.segments[-1].timestamp_end if self.state.segments else 0,
-        ).model_dump())
-    
-    async def handle_reply_request(self, context_hint: str = ""):
-        """Generate reply suggestions on demand."""
-        result = await self.dispatcher.run(
-            "reply",
-            full_context=self.state.get_full_context(),
-            context_hint=context_hint or "No specific context provided.",
-        )
-        await self.broadcast(result)  # ReplySuggestion
-    
-    def _fire_task(self, coro):
-        task = asyncio.create_task(coro)
-        self._running_tasks.add(task)
-        task.add_done_callback(self._running_tasks.discard)
-    
-    async def _run_summary(self):
-        new_segments = self.state.get_transcript_text(
-            last_n=self.SUMMARY_EVERY_N_SEGMENTS
-        )
-        result = await self.dispatcher.run(
-            "summary",
-            current_summary=self.state.current_summary,
-            new_segments=new_segments,
-        )
-        self.state.current_summary = result
-        await self.broadcast(SummaryUpdate(
-            summary=result,
-            covered_until=self.state.segments[-1].timestamp_end,
-        ).model_dump())
-    
-    async def _run_action_items(self):
-        result = await self.dispatcher.run(
-            "action_items",
-            full_context=self.state.get_full_context(),
-            recent_transcript=self.state.get_transcript_text(last_n=10),
-            existing_items=str(self.state.action_items),
-        )
-        # Parse and update self.state.action_items
-        await self.broadcast(ActionItemsUpdate(items=self.state.action_items).model_dump())
-```
+| Worker | Trigger | Task |
+|--------|---------|------|
+| SummaryWorker | Every 10 segments | Progressive summarization |
+| ActionItemWorker | Every 5 segments | Extract/update action items |
+| ContradictionWorker | Every 120 seconds | Detect contradictions |
+| ReplyWorker | On-demand (user request) | Generate reply suggestions |
+| CustomPromptWorker | On-demand (user request) | Execute custom prompt |
+
+Workers run as fire-and-forget `asyncio.Task`s — they don't block the audio pipeline.
 
 ### 3. LLM Dispatcher (Ollama + API Fallback)
 
+Routes reasoning tasks to the best available backend:
+
+- **Light tasks** (summary, action items): Ollama local model (e.g., `llama3.1:8b`)
+- **Heavy tasks** (contradictions, reply, custom): Claude API if enabled, else Ollama heavy model (e.g., `llama3.1:70b`)
+
 ```python
-# backend/reasoning/dispatcher.py
-import httpx
-import anthropic
-from .prompts import (
-    PROGRESSIVE_SUMMARY, ACTION_ITEMS, 
-    CONTRADICTION_DETECTION, REPLY_SUGGESTION, CUSTOM_PROMPT_TEMPLATE
-)
-
-PROMPT_MAP = {
-    "summary": PROGRESSIVE_SUMMARY,
-    "action_items": ACTION_ITEMS,
-    "contradictions": CONTRADICTION_DETECTION,
-    "reply": REPLY_SUGGESTION,
-    "custom": CUSTOM_PROMPT_TEMPLATE,
-}
-
-# Tasks that need higher-quality reasoning → prefer API if available
-HEAVY_TASKS = {"contradictions", "reply", "custom"}
-
 class LLMDispatcher:
-    """Routes LLM tasks to Ollama (local) or Claude API (remote)."""
-    
-    def __init__(self, config):
-        self.ollama_url = config.ollama_url          # http://localhost:11434
-        self.ollama_model = config.ollama_model       # llama3.1:8b
-        self.ollama_heavy_model = config.ollama_heavy_model  # llama3.1:70b (optional)
-        self.use_api_fallback = config.use_api_fallback
-        self.anthropic_client = anthropic.AsyncAnthropic() if self.use_api_fallback else None
-    
     async def run(self, task_name: str, **kwargs) -> str:
-        """Run a reasoning task. Routes to best available backend."""
-        prompt_template = PROMPT_MAP[task_name]
-        prompt = prompt_template.format(**kwargs)
-        
-        # Heavy tasks: try API first if enabled, fallback to local
+        prompt = PROMPT_MAP[task_name].format(**kwargs)
         if task_name in HEAVY_TASKS and self.use_api_fallback:
             try:
                 return await self._call_claude(prompt)
             except Exception:
                 pass  # Fallback to local
-        
         return await self._call_ollama(prompt, heavy=task_name in HEAVY_TASKS)
-    
-    async def _call_ollama(self, prompt: str, heavy: bool = False) -> str:
-        model = self.ollama_heavy_model if heavy else self.ollama_model
-        async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.post(
-                f"{self.ollama_url}/api/generate",
-                json={
-                    "model": model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {"temperature": 0.3, "num_predict": 1024},
-                },
-            )
-            return response.json()["response"]
-    
-    async def _call_claude(self, prompt: str) -> str:
-        response = await self.anthropic_client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1024,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response.content[0].text
 ```
 
 ### 4. WebSocket Gateway
 
 ```python
-# backend/ws/gateway.py
-from fastapi import WebSocket
-import asyncio
-import json
-
 class ConnectionManager:
-    """Manages WebSocket connections and message broadcasting."""
-    
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
-    
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-    
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-    
-    async def broadcast(self, message: dict):
-        """Send message to all connected clients."""
-        data = json.dumps(message, ensure_ascii=False)
-        for conn in self.active_connections:
-            try:
-                await conn.send_text(data)
-            except Exception:
-                pass  # Connection will be cleaned up
+    """Manages WebSocket connections and JSON broadcasting."""
+    async def connect(self, websocket: WebSocket): ...
+    def disconnect(self, websocket: WebSocket): ...
+    async def broadcast(self, message: dict): ...
 ```
 
-### 5. FastAPI Main App
+### 5. Storage (SQLite)
 
 ```python
-# backend/main.py
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.staticfiles import StaticFiles
-import asyncio
-
-from .config import Settings
-from .audio.pipeline import AudioPipeline
-from .reasoning.context_manager import ContextManager
-from .reasoning.dispatcher import LLMDispatcher
-from .ws.gateway import ConnectionManager
-
-app = FastAPI(title="Meeting Copilot")
-settings = Settings()
-ws_manager = ConnectionManager()
-
-# Initialize pipeline components
-dispatcher = LLMDispatcher(settings)
-context_mgr = ContextManager(dispatcher, ws_manager.broadcast)
-audio_pipeline = AudioPipeline(settings)
-audio_pipeline.on_segment(context_mgr.on_new_segment)
-
-@app.websocket("/ws/audio")
-async def audio_websocket(websocket: WebSocket):
-    """Receives audio chunks from frontend, sends back all outputs."""
-    await ws_manager.connect(websocket)
-    try:
-        while True:
-            data = await websocket.receive_bytes()
-            await audio_pipeline.process_audio_chunk(data)
-    except WebSocketDisconnect:
-        ws_manager.disconnect(websocket)
-
-@app.websocket("/ws/control")
-async def control_websocket(websocket: WebSocket):
-    """Receives user commands (custom prompts, reply requests)."""
-    await ws_manager.connect(websocket)
-    try:
-        while True:
-            raw = await websocket.receive_text()
-            msg = json.loads(raw)
-            if msg["type"] == "custom_prompt":
-                await context_mgr.handle_custom_prompt(msg["prompt"])
-            elif msg["type"] == "request_reply":
-                await context_mgr.handle_reply_request(msg.get("context_hint", ""))
-    except WebSocketDisconnect:
-        ws_manager.disconnect(websocket)
+class SessionStore:
+    """aiosqlite-backed persistence. Tables: sessions, segments, meeting_state."""
+    async def create_session(self, title: str) -> str: ...
+    async def save_segment(self, session_id: str, segment: TranscriptSegment): ...
+    async def save_state(self, session_id: str, state: MeetingState): ...
+    async def load_session(self, session_id: str) -> dict: ...
+    async def list_sessions(self) -> list: ...
 ```
 
 ---
 
-## Frontend Key Components
+## Data Flow
 
-### Audio Capture Hook
+### Backend Capture Mode (primary)
 
-```typescript
-// frontend/src/hooks/useAudioCapture.ts
-export function useAudioCapture(wsUrl: string) {
-  const wsRef = useRef<WebSocket | null>(null);
-  const [isRecording, setIsRecording] = useState(false);
+1. User clicks **Start** in frontend → `POST /api/recording/start`
+2. Backend creates session, launches ffmpeg subprocess (mic + system monitor)
+3. ffmpeg streams mixed PCM to stdout → backend reads in asyncio loop
+4. `AudioPipeline.process_audio_chunk()` receives PCM chunks
+5. Pipeline: VAD → Whisper → diarization → emits `TranscriptSegment`
+6. `ContextManager` accumulates segments → triggers LLM workers
+7. WebSocket `/ws/control` broadcasts transcripts + insights to frontend
+8. User clicks **Stop** → `POST /api/recording/stop` → ffmpeg stops → pipeline flushes
 
-  const start = async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({ 
-      audio: { 
-        sampleRate: 16000, 
-        channelCount: 1, 
-        echoCancellation: true,
-        noiseSuppression: true,
-      } 
-    });
+### Browser Capture Mode (fallback)
 
-    const audioContext = new AudioContext({ sampleRate: 16000 });
-    const source = audioContext.createMediaStreamSource(stream);
-    const processor = audioContext.createScriptProcessor(4096, 1, 1);
-
-    wsRef.current = new WebSocket(wsUrl);
-    
-    processor.onaudioprocess = (e) => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        const float32 = e.inputBuffer.getChannelData(0);
-        const int16 = new Int16Array(float32.length);
-        for (let i = 0; i < float32.length; i++) {
-          int16[i] = Math.max(-32768, Math.min(32767, float32[i] * 32768));
-        }
-        wsRef.current.send(int16.buffer);
-      }
-    };
-
-    source.connect(processor);
-    processor.connect(audioContext.destination);
-    setIsRecording(true);
-  };
-
-  return { start, stop, isRecording };
-}
-```
-
-### Meeting State Hook
-
-```typescript
-// frontend/src/hooks/useMeetingState.ts
-interface MeetingState {
-  segments: TranscriptSegment[];
-  summary: string;
-  actionItems: ActionItem[];
-  contradictions: ContradictionAlert[];
-  replySuggestions: string[];
-}
-
-export function useMeetingState(wsUrl: string) {
-  const [state, dispatch] = useReducer(meetingReducer, initialState);
-  
-  useEffect(() => {
-    const ws = new WebSocket(wsUrl);
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      switch (msg.type) {
-        case "transcript_segment":
-          dispatch({ type: "ADD_SEGMENT", payload: msg });
-          break;
-        case "summary_update":
-          dispatch({ type: "SET_SUMMARY", payload: msg.summary });
-          break;
-        case "action_items_update":
-          dispatch({ type: "SET_ACTION_ITEMS", payload: msg.items });
-          break;
-        case "contradiction_alert":
-          dispatch({ type: "ADD_CONTRADICTION", payload: msg });
-          break;
-        case "reply_suggestion":
-          dispatch({ type: "SET_REPLIES", payload: msg.suggestions });
-          break;
-        case "custom_prompt_result":
-          dispatch({ type: "ADD_PROMPT_RESULT", payload: msg });
-          break;
-      }
-    };
-    return () => ws.close();
-  }, [wsUrl]);
-
-  return state;
-}
-```
+1. Frontend calls `getUserMedia()` → captures mic audio
+2. `ScriptProcessorNode` converts float32 → int16 PCM
+3. Binary chunks sent over WebSocket `/ws/audio`
+4. Backend `AudioPipeline.process_audio_chunk()` receives chunks
+5. Steps 5-7 same as above
 
 ---
 
@@ -800,28 +613,36 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # Audio Pipeline
-    whisper_model: str = "large-v3"
-    language: str = "pt"                    # Default language (None for auto-detect)
+    whisper_model: str = "large-v3-turbo"
+    language: str = "pt"
     enable_diarization: bool = True
-    
+
+    # Audio Capture (backend mode)
+    audio_capture_mode: str = "backend"     # "backend" | "browser" | "both"
+    recordings_dir: str = "./recordings"
+    mic_volume: float = 2.0
+    default_mic_source: str = ""            # Empty = auto-detect via pactl
+    default_monitor_source: str = ""        # Empty = auto-detect via pactl
+    save_recordings: bool = True
+
     # LLM - Local
     ollama_url: str = "http://localhost:11434"
-    ollama_model: str = "llama3.1:8b"       # For summaries, action items
-    ollama_heavy_model: str = "llama3.1:70b" # For contradictions, replies (optional)
-    
+    ollama_model: str = "llama3.1:8b"
+    ollama_heavy_model: str = "llama3.1:70b"
+
     # LLM - API Fallback
     use_api_fallback: bool = False
-    anthropic_api_key: str = ""             # Set via ANTHROPIC_API_KEY env var
-    
+    anthropic_api_key: str = ""
+
     # Reasoning Triggers
     summary_every_n_segments: int = 10
     action_scan_every_n_segments: int = 5
     contradiction_check_seconds: int = 120
-    
-    # WebSocket
+
+    # Server
     ws_host: str = "0.0.0.0"
     ws_port: int = 8000
-    
+
     class Config:
         env_file = ".env"
 ```
@@ -829,6 +650,14 @@ class Settings(BaseSettings):
 ---
 
 ## Setup & Dependencies
+
+### System Dependencies
+
+- **Python 3.11+**
+- **ffmpeg** — audio processing and backend capture
+- **PulseAudio** (`pactl` from `pulseaudio-utils` or `pipewire-pulse`) — for backend audio capture
+- **Node.js 18+** — frontend build
+- **Ollama** — local LLM inference
 
 ### Python Dependencies (pyproject.toml)
 
@@ -845,7 +674,6 @@ dependencies = [
     "pydantic-settings>=2.0",
     "httpx>=0.27",
     "faster-whisper>=1.0",
-    "whisperlivekit>=0.3",
     "pyannote.audio>=3.1",
     "silero-vad>=4.0",
     "anthropic>=0.40",
@@ -853,95 +681,20 @@ dependencies = [
 ]
 ```
 
-### Setup Script
-
-```bash
-#!/bin/bash
-# scripts/setup.sh
-
-echo "=== Meeting Copilot Setup ==="
-
-# 1. Python environment
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-
-# 2. Download Whisper model
-python -c "from faster_whisper import WhisperModel; WhisperModel('large-v3')"
-
-# 3. Download pyannote diarization model (requires HuggingFace token)
-echo "Note: pyannote requires a HuggingFace token. Set HF_TOKEN env var."
-python -c "
-from pyannote.audio import Pipeline
-Pipeline.from_pretrained('pyannote/speaker-diarization-3.1', use_auth_token=True)
-"
-
-# 4. Check Ollama
-if command -v ollama &> /dev/null; then
-    echo "Pulling Ollama models..."
-    ollama pull llama3.1:8b
-    echo "Optional: ollama pull llama3.1:70b (for heavy reasoning)"
-else
-    echo "WARNING: Ollama not found. Install from https://ollama.ai"
-fi
-
-# 5. Frontend
-cd frontend && npm install && cd ..
-
-echo "=== Setup complete. Run with: uvicorn backend.main:app --reload ==="
-```
-
----
-
-## Implementation Phases
-
-### Phase 1 — Audio Pipeline (Week 1)
-- [ ] FastAPI skeleton with WebSocket endpoints
-- [ ] WhisperLiveKit integration (streaming transcription)
-- [ ] Audio capture frontend (WebAudio → WebSocket)
-- [ ] Live transcript panel rendering
-- **Milestone**: Audio in → live transcript on screen
-
-### Phase 2 — Diarization + Context Manager (Week 2)  
-- [ ] pyannote diarization integration
-- [ ] Speaker-labeled transcript segments
-- [ ] Context Manager with MeetingState accumulation
-- [ ] Trigger logic (segment count thresholds)
-- **Milestone**: Transcript shows "Speaker 1: ...", "Speaker 2: ..."
-
-### Phase 3 — LLM Reasoning (Week 3)
-- [ ] LLM Dispatcher (Ollama integration)
-- [ ] Progressive summary worker
-- [ ] Action item extraction worker
-- [ ] Copilot panel on frontend
-- **Milestone**: Summary and action items update live during meeting
-
-### Phase 4 — Advanced Reasoning (Week 4)
-- [ ] Contradiction detection worker
-- [ ] Reply suggestion worker
-- [ ] Custom prompt worker
-- [ ] Claude API fallback integration
-- **Milestone**: Full copilot functionality
-
-### Phase 5 — Polish & Persistence (Week 5)
-- [ ] SQLite session storage (save/load meetings)
-- [ ] Meeting export (markdown, JSON)
-- [ ] Frontend polish (settings, theme, responsive layout)
-- [ ] Error handling and reconnection logic
-- **Milestone**: Production-ready for personal use
-
 ---
 
 ## Known Considerations & Tradeoffs
 
-1. **Whisper latency vs accuracy**: `large-v3` gives best accuracy but adds ~2-3s latency. For faster response, use `medium` or `small` models. Configure per use case.
+1. **Whisper latency vs accuracy**: `large-v3` gives best accuracy but adds ~2-3s latency. `large-v3-turbo` is the current default for a good balance. For faster response, use `medium` or `small`.
 
-2. **Diarization accuracy**: pyannote works best with clear audio and distinct speakers. Overlapping speech and phone-quality audio degrade results. Consider making diarization optional.
+2. **Diarization accuracy**: pyannote works best with clear audio and distinct speakers. Overlapping speech and phone-quality audio degrade results. Diarization is optional via config.
 
 3. **LLM context window growth**: As meetings get longer (1h+), the full transcript exceeds context windows. The progressive summary pattern mitigates this — the LLM sees summary + recent_window, not the full transcript.
 
-4. **Ollama concurrency**: Running multiple LLM tasks simultaneously on Ollama with a single GPU can cause queuing. The trigger thresholds should be tuned to avoid overwhelming the inference server. Consider a task priority queue.
+4. **Ollama concurrency**: Running multiple LLM tasks simultaneously on a single GPU causes queuing. The trigger thresholds should be tuned to avoid overwhelming the inference server.
 
 5. **Reply suggestions sensitivity**: Auto-generating replies needs careful tuning to avoid being distracting. Start with manual-only (user clicks "suggest reply") before enabling auto-trigger.
 
 6. **Portuguese language support**: Whisper `large-v3` handles Portuguese well. For LLM reasoning, ensure Ollama model handles PT (Llama 3.1 does). Include language instruction in all prompts.
+
+7. **Backend audio capture is Linux-only**: PulseAudio/PipeWire is Linux-specific. macOS would need BlackHole, Windows would need VB-Cable. Browser fallback mode works cross-platform.
