@@ -132,10 +132,12 @@
 > Done: ContradictionWorker calls dispatcher with "contradictions" task, parses JSON response (handles markdown fences), skips malformed items, defaults unknown severity to "low". ContextManager already had `_last_contradiction_check` + `_run_contradictions()` wired; confirmed complete. CopilotPanel already had contradiction alerts UI with SEVERITY_STYLES (low/medium/high) and expandable statement details; App.tsx passes `state.contradictions` prop. Added 9 new ContradictionWorker tests; 127 total pass. Frontend builds cleanly (64.02 kB JS).
 
 ### 4.2 Reply Suggestions
-- [ ] Create `backend/reasoning/workers/reply.py` — ReplyWorker: generates 2-3 reply suggestions based on meeting context
-- [ ] Wire to `/ws/control` endpoint — handle `request_reply` messages
-- [ ] Create `frontend/src/components/ReplyPanel.tsx` — shows suggestions with copy-to-clipboard buttons
-- [ ] Add "Suggest Reply" button in UI that sends request via control WebSocket
+- [x] Create `backend/reasoning/workers/reply.py` — ReplyWorker: generates 2-3 reply suggestions based on meeting context
+- [x] Wire to `/ws/control` endpoint — handle `request_reply` messages
+- [x] Create `frontend/src/components/ReplyPanel.tsx` — shows suggestions with copy-to-clipboard buttons
+- [x] Add "Suggest Reply" button in UI that sends request via control WebSocket
+
+> Done: ReplyWorker calls dispatcher with "reply" task, parses JSON response (handles markdown fences, non-list suggestions, empty/non-string items), falls back to raw text on invalid JSON, always returns ReplySuggestion with triggered_by="manual". ContextManager.handle_reply_request() now uses ReplyWorker and broadcasts proper ReplySuggestion model_dump(). main.py wired with LLMDispatcher + ContextManager instances; control endpoint now calls context_manager.handle_reply_request() / handle_custom_prompt() via asyncio.create_task(); audio_pipeline.on_segment registered to context_manager.on_new_segment. ReplyPanel.tsx shows suggestions with copy-to-clipboard buttons and optional context hint input. App.tsx includes ReplyPanel in right column with handleRequestReplySuggestions callback. 10 new tests; 137 total pass. Frontend builds cleanly.
 
 ### 4.3 Custom Prompts
 - [ ] Create `backend/reasoning/workers/custom.py` — CustomPromptWorker: runs user's freeform prompt against meeting context

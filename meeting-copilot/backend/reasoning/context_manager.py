@@ -17,6 +17,7 @@ from backend.ws.protocol import (
 from backend.reasoning.workers.summary import SummaryWorker
 from backend.reasoning.workers.action_items import ActionItemWorker
 from backend.reasoning.workers.contradictions import ContradictionWorker
+from backend.reasoning.workers.reply import ReplyWorker
 
 
 @dataclass
@@ -112,6 +113,7 @@ class ContextManager:
         self._summary_worker = SummaryWorker(dispatcher)
         self._action_item_worker = ActionItemWorker(dispatcher)
         self._contradiction_worker = ContradictionWorker(dispatcher)
+        self._reply_worker = ReplyWorker(dispatcher)
 
         # Allow caller to override thresholds (e.g. from Settings or tests)
         if summary_every_n is not None:
@@ -163,12 +165,11 @@ class ContextManager:
 
     async def handle_reply_request(self, context_hint: str = "") -> None:
         """Generate reply suggestions on demand."""
-        result = await self.dispatcher.run(
-            "reply",
+        suggestion = await self._reply_worker.execute(
             full_context=self.state.get_full_context(),
             context_hint=context_hint or "No specific context provided.",
         )
-        await self.broadcast(result)
+        await self.broadcast(suggestion.model_dump())
 
     def _fire_task(self, coro: Any) -> None:
         task = asyncio.create_task(coro)

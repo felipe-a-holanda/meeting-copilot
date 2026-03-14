@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 
@@ -6,6 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.audio.pipeline import AudioPipeline
 from backend.config import Settings
+from backend.reasoning.context_manager import ContextManager
+from backend.reasoning.dispatcher import LLMDispatcher
 from backend.ws.gateway import ConnectionManager
 from backend.ws.protocol import CustomPromptRequest, RequestReplySuggestion
 
@@ -25,6 +28,22 @@ app.add_middleware(
 audio_manager = ConnectionManager()
 control_manager = ConnectionManager()
 audio_pipeline = AudioPipeline(settings)
+
+dispatcher = LLMDispatcher(settings)
+
+
+async def _broadcast_to_clients(data: dict) -> None:
+    """Broadcast a dict payload as JSON to all connected control clients."""
+    await control_manager.broadcast(json.dumps(data))
+
+
+context_manager = ContextManager(
+    dispatcher=dispatcher,
+    broadcast_fn=_broadcast_to_clients,
+)
+
+# Wire audio pipeline → context manager
+audio_pipeline.on_segment(context_manager.on_new_segment)
 
 
 @app.get("/health")
@@ -62,9 +81,15 @@ async def ws_control(websocket: WebSocket) -> None:
                 if msg_type == "request_reply":
                     msg = RequestReplySuggestion(**payload)
                     logger.info("Reply request received: context_hint=%s", msg.context_hint)
+                    asyncio.create_task(
+                        context_manager.handle_reply_request(msg.context_hint or "")
+                    )
                 elif msg_type == "custom_prompt":
                     msg = CustomPromptRequest(**payload)
                     logger.info("Custom prompt received: %s", msg.prompt)
+                    asyncio.create_task(
+                        context_manager.handle_custom_prompt(msg.prompt)
+                    )
                 else:
                     logger.warning("Unknown control message type: %s", msg_type)
             except (json.JSONDecodeError, ValueError) as exc:

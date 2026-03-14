@@ -263,7 +263,7 @@ class TestContextManagerTriggers:
     @pytest.mark.asyncio
     async def test_handle_reply_request(self):
         cm, broadcast_fn = self._make_manager()
-        cm.dispatcher.run = AsyncMock(return_value={"suggestions": ["OK", "Sure"]})
+        cm.dispatcher.run = AsyncMock(return_value='{"suggestions": ["OK", "Sure"], "context": "test"}')
         cm.state.add_segment(make_segment(text="Let's talk"))
 
         await cm.handle_reply_request("more context here")
@@ -278,7 +278,7 @@ class TestContextManagerTriggers:
     @pytest.mark.asyncio
     async def test_handle_reply_request_no_hint(self):
         cm, broadcast_fn = self._make_manager()
-        cm.dispatcher.run = AsyncMock(return_value={"suggestions": []})
+        cm.dispatcher.run = AsyncMock(return_value='{"suggestions": [], "context": ""}')
         await cm.handle_reply_request()
         cm.dispatcher.run.assert_called_with(
             "reply",

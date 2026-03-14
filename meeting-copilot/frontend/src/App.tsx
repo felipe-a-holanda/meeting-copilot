@@ -2,6 +2,7 @@ import React, { useCallback } from 'react';
 import { AudioControls } from './components/AudioControls';
 import { TranscriptPanel } from './components/TranscriptPanel';
 import { CopilotPanel } from './components/CopilotPanel';
+import { ReplyPanel } from './components/ReplyPanel';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useAudioCapture } from './hooks/useAudioCapture';
 import { useMeetingState } from './hooks/useMeetingState';
@@ -33,6 +34,10 @@ function App() {
     controlWs.disconnect();
   }, [audioWs, controlWs, stopCapture]);
 
+  const handleRequestReplySuggestions = useCallback((contextHint: string) => {
+    controlWs.send(JSON.stringify({ type: 'request_reply', context_hint: contextHint || null }));
+  }, [controlWs]);
+
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100">
       <header className="border-b border-gray-700 px-6 py-4">
@@ -53,12 +58,18 @@ function App() {
           <div className="bg-gray-800 rounded-lg p-5 min-h-0">
             <TranscriptPanel segments={state.segments} />
           </div>
-          <div className="bg-gray-800 rounded-lg p-5 min-h-0">
+          <div className="bg-gray-800 rounded-lg p-5 min-h-0 flex flex-col gap-5 overflow-y-auto">
             <CopilotPanel
               summary={state.summary}
               actionItems={state.actionItems}
               contradictions={state.contradictions}
             />
+            <div className="border-t border-gray-700 pt-5">
+              <ReplyPanel
+                suggestion={state.replySuggestions}
+                onRequestSuggestions={handleRequestReplySuggestions}
+              />
+            </div>
           </div>
         </div>
       </main>
