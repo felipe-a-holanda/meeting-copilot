@@ -12,11 +12,11 @@ from backend.ws.protocol import (
     SummaryUpdate,
     ActionItemsUpdate,
     ContradictionAlert,
-    CustomPromptResult,
 )
 from backend.reasoning.workers.summary import SummaryWorker
 from backend.reasoning.workers.action_items import ActionItemWorker
 from backend.reasoning.workers.contradictions import ContradictionWorker
+from backend.reasoning.workers.custom import CustomPromptWorker
 from backend.reasoning.workers.reply import ReplyWorker
 
 
@@ -113,6 +113,7 @@ class ContextManager:
         self._summary_worker = SummaryWorker(dispatcher)
         self._action_item_worker = ActionItemWorker(dispatcher)
         self._contradiction_worker = ContradictionWorker(dispatcher)
+        self._custom_prompt_worker = CustomPromptWorker(dispatcher)
         self._reply_worker = ReplyWorker(dispatcher)
 
         # Allow caller to override thresholds (e.g. from Settings or tests)
@@ -147,21 +148,15 @@ class ContextManager:
 
     async def handle_custom_prompt(self, prompt: str) -> None:
         """Handle user's custom prompt against meeting context."""
-        result = await self.dispatcher.run(
-            "custom",
-            full_context=self.state.get_full_context(),
-            user_prompt=prompt,
-        )
         timestamp = (
             self.state.segments[-1].timestamp_end if self.state.segments else 0.0
         )
-        await self.broadcast(
-            CustomPromptResult(
-                prompt=prompt,
-                result=result,
-                timestamp=timestamp,
-            ).model_dump()
+        result = await self._custom_prompt_worker.execute(
+            full_context=self.state.get_full_context(),
+            user_prompt=prompt,
+            timestamp=timestamp,
         )
+        await self.broadcast(result.model_dump())
 
     async def handle_reply_request(self, context_hint: str = "") -> None:
         """Generate reply suggestions on demand."""

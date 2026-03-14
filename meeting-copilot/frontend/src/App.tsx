@@ -2,6 +2,7 @@ import React, { useCallback } from 'react';
 import { AudioControls } from './components/AudioControls';
 import { TranscriptPanel } from './components/TranscriptPanel';
 import { CopilotPanel } from './components/CopilotPanel';
+import { PromptInput } from './components/PromptInput';
 import { ReplyPanel } from './components/ReplyPanel';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useAudioCapture } from './hooks/useAudioCapture';
@@ -38,6 +39,10 @@ function App() {
     controlWs.send(JSON.stringify({ type: 'request_reply', context_hint: contextHint || null }));
   }, [controlWs]);
 
+  const handleSendCustomPrompt = useCallback((prompt: string) => {
+    controlWs.send(JSON.stringify({ type: 'custom_prompt', prompt }));
+  }, [controlWs]);
+
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100">
       <header className="border-b border-gray-700 px-6 py-4">
@@ -68,6 +73,12 @@ function App() {
               <ReplyPanel
                 suggestion={state.replySuggestions}
                 onRequestSuggestions={handleRequestReplySuggestions}
+              />
+            </div>
+            <div className="border-t border-gray-700 pt-5">
+              <PromptInput
+                results={state.customPromptResults}
+                onSendPrompt={handleSendCustomPrompt}
               />
             </div>
           </div>

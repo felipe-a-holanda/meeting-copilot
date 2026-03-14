@@ -140,10 +140,12 @@
 > Done: ReplyWorker calls dispatcher with "reply" task, parses JSON response (handles markdown fences, non-list suggestions, empty/non-string items), falls back to raw text on invalid JSON, always returns ReplySuggestion with triggered_by="manual". ContextManager.handle_reply_request() now uses ReplyWorker and broadcasts proper ReplySuggestion model_dump(). main.py wired with LLMDispatcher + ContextManager instances; control endpoint now calls context_manager.handle_reply_request() / handle_custom_prompt() via asyncio.create_task(); audio_pipeline.on_segment registered to context_manager.on_new_segment. ReplyPanel.tsx shows suggestions with copy-to-clipboard buttons and optional context hint input. App.tsx includes ReplyPanel in right column with handleRequestReplySuggestions callback. 10 new tests; 137 total pass. Frontend builds cleanly.
 
 ### 4.3 Custom Prompts
-- [ ] Create `backend/reasoning/workers/custom.py` — CustomPromptWorker: runs user's freeform prompt against meeting context
-- [ ] Wire to `/ws/control` endpoint — handle `custom_prompt` messages
-- [ ] Create `frontend/src/components/PromptInput.tsx` — text input + send button, displays results inline
-- [ ] Add prompt history display (shows previous prompts and their results)
+- [x] Create `backend/reasoning/workers/custom.py` — CustomPromptWorker: runs user's freeform prompt against meeting context
+- [x] Wire to `/ws/control` endpoint — handle `custom_prompt` messages
+- [x] Create `frontend/src/components/PromptInput.tsx` — text input + send button, displays results inline
+- [x] Add prompt history display (shows previous prompts and their results)
+
+> Done: CustomPromptWorker wraps dispatcher.run("custom") call, returns CustomPromptResult with stripped result and timestamp. ContextManager.handle_custom_prompt() updated to use the worker instead of calling dispatcher directly. PromptInput.tsx shows text input + Ask button + prompt history (newest first, max-h-60 scrollable), wired into App.tsx with handleSendCustomPrompt callback that sends {type:"custom_prompt", prompt} over control WebSocket. 6 new CustomPromptWorker tests; 159 total pass (1 pre-existing fastapi import failure). Frontend builds cleanly.
 
 ---
 

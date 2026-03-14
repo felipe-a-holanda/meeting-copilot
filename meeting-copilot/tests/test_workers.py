@@ -8,7 +8,8 @@ from backend.reasoning.workers.base import BaseWorker
 from backend.reasoning.workers.summary import SummaryWorker
 from backend.reasoning.workers.action_items import ActionItemWorker
 from backend.reasoning.workers.contradictions import ContradictionWorker
-from backend.ws.protocol import ActionItem, ContradictionAlert
+from backend.reasoning.workers.custom import CustomPromptWorker
+from backend.ws.protocol import ActionItem, ContradictionAlert, CustomPromptResult
 
 
 # ---------------------------------------------------------------------------
@@ -485,3 +486,95 @@ class TestContradictionWorker:
 
         call_kwargs = dispatcher.run.call_args[1]
         assert "No summary yet" in call_kwargs["current_summary"]
+
+
+# ===========================================================================
+# CustomPromptWorker
+# ===========================================================================
+
+class TestCustomPromptWorker:
+    @pytest.mark.asyncio
+    async def test_calls_dispatcher_with_correct_task(self):
+        """CustomPromptWorker calls dispatcher.run('custom', ...)."""
+        dispatcher = _mock_dispatcher("Here is the answer.")
+        worker = CustomPromptWorker(dispatcher)
+
+        await worker.execute(
+            full_context="Meeting context here",
+            user_prompt="What decisions were made?",
+        )
+
+        dispatcher.run.assert_called_once()
+        assert dispatcher.run.call_args[0][0] == "custom"
+
+    @pytest.mark.asyncio
+    async def test_returns_custom_prompt_result(self):
+        """execute() returns a CustomPromptResult with correct fields."""
+        dispatcher = _mock_dispatcher("  The answer is 42.  ")
+        worker = CustomPromptWorker(dispatcher)
+
+        result = await worker.execute(
+            full_context="context",
+            user_prompt="What is the answer?",
+            timestamp=99.5,
+        )
+
+        assert isinstance(result, CustomPromptResult)
+        assert result.prompt == "What is the answer?"
+        assert result.result == "The answer is 42."
+        assert result.timestamp == 99.5
+        assert result.type == "custom_prompt_result"
+
+    @pytest.mark.asyncio
+    async def test_strips_whitespace_from_result(self):
+        """Result is stripped of leading/trailing whitespace."""
+        dispatcher = _mock_dispatcher("\n  Stripped response \n")
+        worker = CustomPromptWorker(dispatcher)
+
+        result = await worker.execute(
+            full_context="ctx",
+            user_prompt="Question?",
+        )
+
+        assert result.result == "Stripped response"
+
+    @pytest.mark.asyncio
+    async def test_defaults_timestamp_to_zero(self):
+        """When no timestamp provided, defaults to 0.0."""
+        dispatcher = _mock_dispatcher("Answer")
+        worker = CustomPromptWorker(dispatcher)
+
+        result = await worker.execute(
+            full_context="ctx",
+            user_prompt="Q?",
+        )
+
+        assert result.timestamp == 0.0
+
+    @pytest.mark.asyncio
+    async def test_uses_placeholder_when_no_context(self):
+        """When full_context is empty, passes placeholder to dispatcher."""
+        dispatcher = _mock_dispatcher("Answer")
+        worker = CustomPromptWorker(dispatcher)
+
+        await worker.execute(
+            full_context="",
+            user_prompt="Any questions?",
+        )
+
+        call_kwargs = dispatcher.run.call_args[1]
+        assert "No meeting context yet" in call_kwargs["full_context"]
+
+    @pytest.mark.asyncio
+    async def test_passes_user_prompt_to_dispatcher(self):
+        """user_prompt is forwarded as-is to the dispatcher."""
+        dispatcher = _mock_dispatcher("Response")
+        worker = CustomPromptWorker(dispatcher)
+
+        await worker.execute(
+            full_context="context",
+            user_prompt="List all action items please.",
+        )
+
+        call_kwargs = dispatcher.run.call_args[1]
+        assert call_kwargs["user_prompt"] == "List all action items please."
