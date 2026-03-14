@@ -1,13 +1,11 @@
-"""Tests for SpeakerDiarizer and AudioPipeline diarization integration.
+"""Tests for AudioPipeline speaker_label integration.
 
-All heavy ML dependencies (pyannote, torch) are mocked so that
-these tests run without GPU or model downloads.
+SpeakerDiarizer and pyannote.audio have been removed.
+Speaker attribution is now done via stream-based labels ("Me" / "Them").
 """
 from __future__ import annotations
 
-import sys
-from dataclasses import dataclass
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -25,163 +23,6 @@ def make_sine_wave(duration_seconds: float = 2.0, sample_rate: int = 16000) -> n
 def make_pcm_bytes(duration_seconds: float = 2.0, sample_rate: int = 16000) -> bytes:
     f32 = make_sine_wave(duration_seconds=duration_seconds, sample_rate=sample_rate)
     return (f32 * 32768).astype(np.int16).tobytes()
-
-
-@dataclass
-class _MockSegment:
-    start: float
-    end: float
-
-
-def _make_mock_annotation(tracks: list[tuple[float, float, str]]) -> MagicMock:
-    """Build a mock pyannote Annotation with given (start, end, speaker) tracks."""
-    annotation = MagicMock()
-    annotation.itertracks.return_value = [
-        (_MockSegment(start, end), None, speaker)
-        for start, end, speaker in tracks
-    ]
-    return annotation
-
-
-def _make_mock_pipeline(annotation: MagicMock) -> MagicMock:
-    pipeline = MagicMock()
-    pipeline.return_value = annotation
-    return pipeline
-
-
-def _make_mock_torch(audio_f32: np.ndarray | None = None):
-    mock_torch = MagicMock()
-    mock_tensor = MagicMock()
-    mock_tensor.unsqueeze.return_value = mock_tensor
-    mock_torch.from_numpy.return_value = mock_tensor
-    return mock_torch
-
-
-# ---------------------------------------------------------------------------
-# SpeakerDiarizer unit tests
-# ---------------------------------------------------------------------------
-
-class TestSpeakerDiarizer:
-
-    def test_diarize_returns_results(self):
-        """diarize() returns DiarizationResult list from mock pyannote output."""
-        from backend.audio.diarizer import SpeakerDiarizer
-
-        annotation = _make_mock_annotation([
-            (0.0, 2.0, "SPEAKER_00"),
-            (2.1, 4.0, "SPEAKER_01"),
-        ])
-        mock_pipeline = _make_mock_pipeline(annotation)
-
-        diarizer = SpeakerDiarizer(hf_token="fake-token")
-        diarizer._pipeline = mock_pipeline  # inject pre-loaded mock
-
-        audio = make_sine_wave(duration_seconds=4.0)
-
-        with patch.dict(sys.modules, {"torch": _make_mock_torch()}):
-            results = diarizer.diarize(audio, sample_rate=16000)
-
-        assert len(results) == 2
-        assert results[0].speaker == "SPEAKER_00"
-        assert results[0].start == 0.0
-        assert results[0].end == 2.0
-        assert results[1].speaker == "SPEAKER_01"
-        assert results[1].start == 2.1
-
-    def test_diarize_empty_annotation(self):
-        """diarize() returns empty list when no speakers detected."""
-        from backend.audio.diarizer import SpeakerDiarizer
-
-        annotation = _make_mock_annotation([])
-        diarizer = SpeakerDiarizer()
-        diarizer._pipeline = _make_mock_pipeline(annotation)
-
-        audio = make_sine_wave(duration_seconds=2.0)
-        with patch.dict(sys.modules, {"torch": _make_mock_torch()}):
-            results = diarizer.diarize(audio, sample_rate=16000)
-
-        assert results == []
-
-    def test_diarize_sorted_by_start(self):
-        """diarize() results are sorted by start time."""
-        from backend.audio.diarizer import SpeakerDiarizer
-
-        annotation = _make_mock_annotation([
-            (3.0, 5.0, "SPEAKER_01"),
-            (0.0, 2.0, "SPEAKER_00"),
-        ])
-        diarizer = SpeakerDiarizer()
-        diarizer._pipeline = _make_mock_pipeline(annotation)
-
-        audio = make_sine_wave(duration_seconds=5.0)
-        with patch.dict(sys.modules, {"torch": _make_mock_torch()}):
-            results = diarizer.diarize(audio, sample_rate=16000)
-
-        assert results[0].start < results[1].start
-
-    def test_get_speaker_at_returns_correct_speaker(self):
-        """get_speaker_at() returns speaker for a timestamp within their segment."""
-        from backend.audio.diarizer import SpeakerDiarizer, DiarizationResult
-
-        diarizer = SpeakerDiarizer()
-        results = [
-            DiarizationResult(speaker="SPEAKER_00", start=0.0, end=2.0),
-            DiarizationResult(speaker="SPEAKER_01", start=2.1, end=4.0),
-        ]
-
-        assert diarizer.get_speaker_at(results, 1.0) == "SPEAKER_00"
-        assert diarizer.get_speaker_at(results, 3.0) == "SPEAKER_01"
-
-    def test_get_speaker_at_gap_returns_fallback(self):
-        """get_speaker_at() returns fallback when timestamp falls in a gap."""
-        from backend.audio.diarizer import SpeakerDiarizer, DiarizationResult
-
-        diarizer = SpeakerDiarizer()
-        results = [
-            DiarizationResult(speaker="SPEAKER_00", start=0.0, end=2.0),
-            DiarizationResult(speaker="SPEAKER_01", start=2.5, end=4.0),
-        ]
-
-        assert diarizer.get_speaker_at(results, 2.2) == "Speaker"
-        assert diarizer.get_speaker_at(results, 2.2, fallback="Unknown") == "Unknown"
-
-    def test_get_speaker_at_empty_results_returns_fallback(self):
-        """get_speaker_at() returns fallback when no results available."""
-        from backend.audio.diarizer import SpeakerDiarizer
-
-        diarizer = SpeakerDiarizer()
-        assert diarizer.get_speaker_at([], 1.0) == "Speaker"
-
-    def test_load_raises_on_missing_pyannote(self):
-        """SpeakerDiarizer raises RuntimeError if pyannote.audio is not installed."""
-        from backend.audio.diarizer import SpeakerDiarizer
-
-        diarizer = SpeakerDiarizer()
-        with patch.dict(sys.modules, {"pyannote.audio": None, "pyannote": None}):
-            with pytest.raises(RuntimeError, match="pyannote.audio"):
-                diarizer._load()
-
-    def test_diarize_raises_on_missing_torch(self):
-        """diarize() raises RuntimeError if torch is not installed."""
-        from backend.audio.diarizer import SpeakerDiarizer
-
-        annotation = _make_mock_annotation([])
-        diarizer = SpeakerDiarizer()
-        diarizer._pipeline = _make_mock_pipeline(annotation)
-
-        audio = make_sine_wave(duration_seconds=1.0)
-        with patch.dict(sys.modules, {"torch": None}):
-            with pytest.raises(RuntimeError, match="torch"):
-                diarizer.diarize(audio)
-
-    def test_diarize_result_dataclass_fields(self):
-        """DiarizationResult has speaker, start, end fields."""
-        from backend.audio.diarizer import DiarizationResult
-
-        r = DiarizationResult(speaker="SPEAKER_00", start=0.5, end=2.5)
-        assert r.speaker == "SPEAKER_00"
-        assert r.start == 0.5
-        assert r.end == 2.5
 
 
 # ---------------------------------------------------------------------------

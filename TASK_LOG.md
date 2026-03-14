@@ -85,9 +85,10 @@
   > Replaced single amix ffmpeg process with two separate processes (`_mic_process` / `_monitor_process`). Removed `_build_ffmpeg_cmd` (amix), renamed `_build_ffmpeg_cmd_mic_only` → `_build_stream_cmd` (used for both streams). Added `_stop_process()` helper. Reader loop now parameterised with `(process, speaker_label)`. Updated all 4 recorder test files; added `test_recorder_dual_stream.py` with 20 dual-stream-specific tests. 78 new/updated tests all pass; 3 pre-existing failures unchanged.
 
 ### 1B.3 Delete diarizer.py
-- [ ] Delete `backend/audio/diarizer.py`
-- [ ] Remove `SpeakerDiarizer` import from any file that still references it
-- [ ] Verify no remaining references with `grep -r "diarizer\|SpeakerDiarizer\|pyannote" backend/`
+- [x] Delete `backend/audio/diarizer.py`
+- [x] Remove `SpeakerDiarizer` import from any file that still references it
+- [x] Verify no remaining references with `grep -r "diarizer\|SpeakerDiarizer\|pyannote" backend/`
+  > Deleted `backend/audio/diarizer.py`. Removed `TestSpeakerDiarizer` class and its pyannote helpers from `test_diarizer.py` (the `TestAudioPipelineSpeakerLabel` class was kept). No import-level references remain; only comments in `recorder.py` and `config.py` mention pyannote in passing (cleaned up in 1B.4/1B.5). 253 tests pass, 3 pre-existing failures unchanged.
 
 ### 1B.4 Remove Diarization Config and Dependency
 - [ ] In `backend/config.py`, remove `enable_diarization: bool = True` and `hf_token: str = ""`
