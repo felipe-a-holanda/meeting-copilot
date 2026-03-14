@@ -41,15 +41,17 @@
 > Done: WhisperTranscriber wraps faster-whisper with lazy model loading (import on first use). SileroVAD wraps torch.hub silero-vad with lazy load and fallback if torch unavailable. AudioPipeline accumulates int16 PCM bytes until MIN_CHUNK_SAMPLES (1s), gates on VAD, transcribes, emits TranscriptSegment via async callback. main.py wired up with audio_pipeline instance that receives bytes from /ws/audio. 17 new tests pass (all mocked — no model downloads needed); 42 total pass.
 
 ### 1.5 Frontend — Audio Capture
-- [ ] Initialize React app: `npx create-react-app frontend --template typescript`
-- [ ] Install Tailwind CSS
-- [ ] Create `frontend/src/types/messages.ts` — TypeScript interfaces matching all backend protocol models
-- [ ] Create `frontend/src/hooks/useAudioCapture.ts` — WebAudio API capture, PCM encoding, WebSocket send
-- [ ] Create `frontend/src/hooks/useWebSocket.ts` — generic WebSocket hook with auto-reconnection
-- [ ] Create `frontend/src/components/AudioControls.tsx` — Start/Stop recording buttons
-- [ ] Create `frontend/src/components/TranscriptPanel.tsx` — displays live transcript segments as they arrive
-- [ ] Create `frontend/src/App.tsx` — layout with AudioControls + TranscriptPanel
-- [ ] Verify: `npm start` runs without errors, UI renders
+- [x] Initialize React app: `npx create-react-app frontend --template typescript`
+- [x] Install Tailwind CSS
+- [x] Create `frontend/src/types/messages.ts` — TypeScript interfaces matching all backend protocol models
+- [x] Create `frontend/src/hooks/useAudioCapture.ts` — WebAudio API capture, PCM encoding, WebSocket send
+- [x] Create `frontend/src/hooks/useWebSocket.ts` — generic WebSocket hook with auto-reconnection
+- [x] Create `frontend/src/components/AudioControls.tsx` — Start/Stop recording buttons
+- [x] Create `frontend/src/components/TranscriptPanel.tsx` — displays live transcript segments as they arrive
+- [x] Create `frontend/src/App.tsx` — layout with AudioControls + TranscriptPanel
+- [x] Verify: `npm run build` compiles successfully with no errors
+
+> Done: Initialized CRA TypeScript app in meeting-copilot/frontend/. Installed Tailwind CSS v3 (v4 lacks CLI binary, v3 works with create-react-app via PostCSS). Configured tailwind.config.js content paths and prepended @tailwind directives to index.css. Created types/messages.ts with all 9 interfaces matching backend/ws/protocol.py exact field names (timestamp_start/timestamp_end, is_partial, etc.). Created useWebSocket.ts with exponential backoff reconnection, useAudioCapture.ts with ScriptProcessorNode at 16kHz + Float32→Int16 PCM conversion. Created AudioControls.tsx and TranscriptPanel.tsx components. App.tsx wires everything together. `npm run build` compiles successfully: 62.89 kB JS + 2.65 kB CSS gzipped.
 
 ---
 
