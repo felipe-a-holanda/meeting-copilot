@@ -269,8 +269,7 @@ class AudioRecorder:
         self._chunks_processed = 0
         self._bytes_read = 0
 
-        # Reader loop is wired up in Task 1.3; placeholder stored here
-        self._reader_task = None
+        self._reader_task = asyncio.create_task(self._reader_loop())
 
     async def stop(self) -> RecordingStats:
         """Stop the ffmpeg process and return recording stats.
@@ -279,17 +278,6 @@ class AudioRecorder:
         """
         if not self._is_recording or self._process is None:
             raise RuntimeError("Not currently recording")
-
-        # Cancel reader task (Task 1.3 concern, but handle if present)
-        if self._reader_task is not None and not self._reader_task.done():
-            self._reader_task.cancel()
-            try:
-                await asyncio.wait_for(
-                    asyncio.shield(self._reader_task), timeout=1.0
-                )
-            except (asyncio.CancelledError, asyncio.TimeoutError):
-                pass
-            self._reader_task = None
 
         # Graceful shutdown
         try:
@@ -306,6 +294,24 @@ class AudioRecorder:
             except ProcessLookupError:
                 pass
             await self._process.wait()
+
+        # Cancel reader task after ffmpeg has exited
+        if self._reader_task is not None and not self._reader_task.done():
+            self._reader_task.cancel()
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(self._reader_task), timeout=1.0
+                )
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+        self._reader_task = None
+
+        # Flush any buffered audio in the pipeline
+        if self._pipeline is not None:
+            try:
+                await self._pipeline.reset()
+            except Exception as exc:
+                logger.error("Pipeline reset error: %s", exc)
 
         duration = (
             time.monotonic() - self._start_time
@@ -331,6 +337,34 @@ class AudioRecorder:
             stats.bytes_read,
         )
         return stats
+
+    # ------------------------------------------------------------------
+    # Reader loop
+    # ------------------------------------------------------------------
+
+    async def _reader_loop(self) -> None:
+        """Read PCM chunks from ffmpeg stdout and forward them to the pipeline."""
+        assert self._process is not None
+        assert self._process.stdout is not None
+
+        try:
+            while True:
+                chunk = await self._process.stdout.read(CHUNK_SIZE)
+                if not chunk:
+                    logger.info("Reader loop: EOF from ffmpeg stdout")
+                    break
+                self._chunks_processed += 1
+                self._bytes_read += len(chunk)
+                if self._pipeline is not None:
+                    try:
+                        await self._pipeline.process_audio_chunk(chunk)
+                    except Exception as exc:
+                        logger.error("Pipeline error processing chunk: %s", exc)
+        except asyncio.CancelledError:
+            logger.debug("Reader loop cancelled")
+            raise
+        except Exception as exc:
+            logger.error("Reader loop unexpected error: %s", exc)
 
     # ------------------------------------------------------------------
     # Properties

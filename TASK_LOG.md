@@ -35,14 +35,15 @@
   > Added `RecordingStats` dataclass, `_build_ffmpeg_cmd`, `_build_ffmpeg_cmd_mic_only`, `start()`, `stop()`, and `recording_stats` property. `start()` uses `None` sentinel to distinguish "auto-detect" from explicit `""` (mic-only). `stop()` sends SIGINT, waits 5 s, then SIGKILL. 21 tests all passing.
 
 ### 1.3 Pipeline Integration — Reader Loop
-- [ ] In `AudioRecorder`, implement `_reader_loop()` — an async task that:
+- [x] In `AudioRecorder`, implement `_reader_loop()` — an async task that:
   - Reads chunks from `self._process.stdout` (4096 bytes at a time, matching existing chunk size)
   - Calls `self._pipeline.process_audio_chunk(chunk)` for each chunk
   - Handles EOF (ffmpeg stopped) and errors
   - Updates stats counters (chunks read, bytes read, duration)
-- [ ] In `start()`, create the reader loop as an `asyncio.Task` stored in `self._reader_task`
-- [ ] In `stop()`, cancel the reader task after ffmpeg exits, then call `self._pipeline.reset()` to flush
-- [ ] Write tests: `tests/test_recorder_integration.py` — create a mock subprocess with fake PCM data on stdout, verify chunks are forwarded to a mock pipeline. Test EOF handling. Test error during read.
+- [x] In `start()`, create the reader loop as an `asyncio.Task` stored in `self._reader_task`
+- [x] In `stop()`, cancel the reader task after ffmpeg exits, then call `self._pipeline.reset()` to flush
+- [x] Write tests: `tests/test_recorder_integration.py` — create a mock subprocess with fake PCM data on stdout, verify chunks are forwarded to a mock pipeline. Test EOF handling. Test error during read.
+  > `_reader_loop` reads CHUNK_SIZE bytes, forwards each to `pipeline.process_audio_chunk`, handles EOF cleanly and logs errors without crashing. `start()` stores the task in `_reader_task`. `stop()` cancels the task and calls `pipeline.reset()`. 9 tests all passing.
 
 ### 1.4 Optional WAV File Saving
 - [ ] Add `save_to_file` parameter to `start()` — when provided, use ffmpeg tee muxer or a second output to write a WAV file alongside piping to stdout
