@@ -11,10 +11,12 @@ from backend.ws.protocol import (
     ActionItem,
     SummaryUpdate,
     ActionItemsUpdate,
+    ContradictionAlert,
     CustomPromptResult,
 )
 from backend.reasoning.workers.summary import SummaryWorker
 from backend.reasoning.workers.action_items import ActionItemWorker
+from backend.reasoning.workers.contradictions import ContradictionWorker
 
 
 @dataclass
@@ -104,10 +106,12 @@ class ContextManager:
         self.dispatcher = dispatcher
         self.broadcast = broadcast_fn
         self._running_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+        self._last_contradiction_check: float = time.time()
 
         # Workers
         self._summary_worker = SummaryWorker(dispatcher)
         self._action_item_worker = ActionItemWorker(dispatcher)
+        self._contradiction_worker = ContradictionWorker(dispatcher)
 
         # Allow caller to override thresholds (e.g. from Settings or tests)
         if summary_every_n is not None:
@@ -132,6 +136,12 @@ class ContextManager:
         if self.state.segments_since_last_action_scan >= self.ACTION_SCAN_EVERY_N_SEGMENTS:
             self._fire_task(self._run_action_items())
             self.state.segments_since_last_action_scan = 0
+
+        # Time-based contradiction check
+        now = time.time()
+        if now - self._last_contradiction_check >= self.CONTRADICTION_CHECK_SECONDS:
+            self._fire_task(self._run_contradictions())
+            self._last_contradiction_check = now
 
     async def handle_custom_prompt(self, prompt: str) -> None:
         """Handle user's custom prompt against meeting context."""
@@ -180,6 +190,14 @@ class ContextManager:
                 covered_until=self.state.segments[-1].timestamp_end,
             ).model_dump()
         )
+
+    async def _run_contradictions(self) -> None:
+        alerts = await self._contradiction_worker.execute(
+            current_summary=self.state.current_summary,
+            recent_transcript=self.state.get_transcript_text(last_n=20),
+        )
+        for alert in alerts:
+            await self.broadcast(alert.model_dump())
 
     async def _run_action_items(self) -> None:
         updated_items = await self._action_item_worker.execute(

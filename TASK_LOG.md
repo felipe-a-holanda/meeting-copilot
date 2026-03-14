@@ -125,9 +125,11 @@
 ## Phase 4 — Advanced Reasoning & Interactivity
 
 ### 4.1 Contradiction Detection
-- [ ] Create `backend/reasoning/workers/contradictions.py` — ContradictionWorker: analyzes recent transcript against summary, parses JSON response
-- [ ] Add time-based trigger in ContextManager — run contradiction check every N seconds
-- [ ] Frontend: add contradiction alerts to CopilotPanel with severity badges and expandable details
+- [x] Create `backend/reasoning/workers/contradictions.py` — ContradictionWorker: analyzes recent transcript against summary, parses JSON response
+- [x] Add time-based trigger in ContextManager — run contradiction check every N seconds
+- [x] Frontend: add contradiction alerts to CopilotPanel with severity badges and expandable details
+
+> Done: ContradictionWorker calls dispatcher with "contradictions" task, parses JSON response (handles markdown fences), skips malformed items, defaults unknown severity to "low". ContextManager already had `_last_contradiction_check` + `_run_contradictions()` wired; confirmed complete. CopilotPanel already had contradiction alerts UI with SEVERITY_STYLES (low/medium/high) and expandable statement details; App.tsx passes `state.contradictions` prop. Added 9 new ContradictionWorker tests; 127 total pass. Frontend builds cleanly (64.02 kB JS).
 
 ### 4.2 Reply Suggestions
 - [ ] Create `backend/reasoning/workers/reply.py` — ReplyWorker: generates 2-3 reply suggestions based on meeting context

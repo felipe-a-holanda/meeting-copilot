@@ -57,6 +57,7 @@ function App() {
             <CopilotPanel
               summary={state.summary}
               actionItems={state.actionItems}
+              contradictions={state.contradictions}
             />
           </div>
         </div>

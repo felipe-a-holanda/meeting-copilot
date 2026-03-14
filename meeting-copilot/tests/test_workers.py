@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, MagicMock
 from backend.reasoning.workers.base import BaseWorker
 from backend.reasoning.workers.summary import SummaryWorker
 from backend.reasoning.workers.action_items import ActionItemWorker
-from backend.ws.protocol import ActionItem
+from backend.reasoning.workers.contradictions import ContradictionWorker
+from backend.ws.protocol import ActionItem, ContradictionAlert
 
 
 # ---------------------------------------------------------------------------
@@ -305,3 +306,182 @@ class TestActionItemWorker:
         parsed = json.loads(call_kwargs["existing_items"])
         assert len(parsed) == 1
         assert parsed[0]["id"] == "x1"
+
+
+# ===========================================================================
+# ContradictionWorker
+# ===========================================================================
+
+class TestContradictionWorker:
+    @pytest.mark.asyncio
+    async def test_calls_dispatcher_with_correct_task(self):
+        """ContradictionWorker calls dispatcher.run('contradictions', ...)."""
+        response = json.dumps({"contradictions": []})
+        dispatcher = _mock_dispatcher(response)
+        worker = ContradictionWorker(dispatcher)
+
+        await worker.execute(
+            current_summary="Summary so far",
+            recent_transcript="[Speaker A @ 10s]: Hello",
+        )
+
+        dispatcher.run.assert_called_once()
+        assert dispatcher.run.call_args[0][0] == "contradictions"
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_list_when_no_transcript(self):
+        """Empty transcript returns empty list without calling dispatcher."""
+        dispatcher = _mock_dispatcher('{"contradictions": []}')
+        worker = ContradictionWorker(dispatcher)
+
+        result = await worker.execute(
+            current_summary="Summary",
+            recent_transcript="   ",
+        )
+
+        dispatcher.run.assert_not_called()
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_parses_contradictions(self):
+        """Contradictions from LLM response are parsed into ContradictionAlert objects."""
+        response = json.dumps({
+            "contradictions": [
+                {
+                    "description": "Speaker changed position on deadline",
+                    "statement_a": "We'll ship by Friday",
+                    "statement_b": "I said we need two more weeks",
+                    "severity": "high",
+                },
+            ]
+        })
+        dispatcher = _mock_dispatcher(response)
+        worker = ContradictionWorker(dispatcher)
+
+        result = await worker.execute(
+            current_summary="Summary",
+            recent_transcript="[Speaker A @ 10s]: text",
+        )
+
+        assert len(result) == 1
+        alert = result[0]
+        assert isinstance(alert, ContradictionAlert)
+        assert alert.description == "Speaker changed position on deadline"
+        assert alert.statement_a == "We'll ship by Friday"
+        assert alert.statement_b == "I said we need two more weeks"
+        assert alert.severity == "high"
+        assert alert.type == "contradiction_alert"
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_list_when_no_contradictions(self):
+        """Empty contradictions list from LLM returns empty list."""
+        dispatcher = _mock_dispatcher('{"contradictions": []}')
+        worker = ContradictionWorker(dispatcher)
+
+        result = await worker.execute(
+            current_summary="Summary",
+            recent_transcript="[A @ 5s]: All good",
+        )
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_handles_invalid_json(self):
+        """Invalid JSON response returns empty list."""
+        dispatcher = _mock_dispatcher("Not JSON at all")
+        worker = ContradictionWorker(dispatcher)
+
+        result = await worker.execute(
+            current_summary="Summary",
+            recent_transcript="[A @ 5s]: text",
+        )
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_handles_markdown_code_fences(self):
+        """JSON wrapped in markdown code fences is parsed correctly."""
+        inner = json.dumps({
+            "contradictions": [
+                {
+                    "description": "Budget contradiction",
+                    "statement_a": "Budget is 100k",
+                    "statement_b": "Budget is 50k",
+                    "severity": "medium",
+                }
+            ]
+        })
+        response = f"```json\n{inner}\n```"
+        dispatcher = _mock_dispatcher(response)
+        worker = ContradictionWorker(dispatcher)
+
+        result = await worker.execute(
+            current_summary="Summary",
+            recent_transcript="[A @ 5s]: text",
+        )
+
+        assert len(result) == 1
+        assert result[0].severity == "medium"
+
+    @pytest.mark.asyncio
+    async def test_defaults_unknown_severity_to_low(self):
+        """Unknown severity values default to 'low'."""
+        response = json.dumps({
+            "contradictions": [
+                {
+                    "description": "Some contradiction",
+                    "statement_a": "Statement A",
+                    "statement_b": "Statement B",
+                    "severity": "unknown_value",
+                }
+            ]
+        })
+        dispatcher = _mock_dispatcher(response)
+        worker = ContradictionWorker(dispatcher)
+
+        result = await worker.execute(
+            current_summary="Summary",
+            recent_transcript="[A @ 5s]: text",
+        )
+
+        assert len(result) == 1
+        assert result[0].severity == "low"
+
+    @pytest.mark.asyncio
+    async def test_skips_malformed_contradictions(self):
+        """Items missing required 'description' field are skipped."""
+        response = json.dumps({
+            "contradictions": [
+                {"statement_a": "No description field", "severity": "low"},
+                {
+                    "description": "Valid contradiction",
+                    "statement_a": "A",
+                    "statement_b": "B",
+                    "severity": "high",
+                },
+            ]
+        })
+        dispatcher = _mock_dispatcher(response)
+        worker = ContradictionWorker(dispatcher)
+
+        result = await worker.execute(
+            current_summary="Summary",
+            recent_transcript="[A @ 5s]: text",
+        )
+
+        assert len(result) == 1
+        assert result[0].description == "Valid contradiction"
+
+    @pytest.mark.asyncio
+    async def test_uses_placeholder_when_summary_empty(self):
+        """When summary is empty, sends placeholder to dispatcher."""
+        dispatcher = _mock_dispatcher('{"contradictions": []}')
+        worker = ContradictionWorker(dispatcher)
+
+        await worker.execute(
+            current_summary="",
+            recent_transcript="[A @ 5s]: text",
+        )
+
+        call_kwargs = dispatcher.run.call_args[1]
+        assert "No summary yet" in call_kwargs["current_summary"]

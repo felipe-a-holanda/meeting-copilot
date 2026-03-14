@@ -1,9 +1,10 @@
-import React from 'react';
-import { ActionItem } from '../types/messages';
+import React, { useState } from 'react';
+import { ActionItem, ContradictionAlert } from '../types/messages';
 
 interface CopilotPanelProps {
   summary: string;
   actionItems: ActionItem[];
+  contradictions: ContradictionAlert[];
 }
 
 const STATUS_STYLES: Record<ActionItem['status'], { bg: string; text: string }> = {
@@ -12,9 +13,57 @@ const STATUS_STYLES: Record<ActionItem['status'], { bg: string; text: string }> 
   completed: { bg: 'bg-green-900/50', text: 'text-green-300' },
 };
 
-export function CopilotPanel({ summary, actionItems }: CopilotPanelProps) {
+const SEVERITY_STYLES: Record<ContradictionAlert['severity'], { bg: string; text: string; border: string }> = {
+  low: { bg: 'bg-yellow-900/30', text: 'text-yellow-300', border: 'border-yellow-700' },
+  medium: { bg: 'bg-orange-900/30', text: 'text-orange-300', border: 'border-orange-700' },
+  high: { bg: 'bg-red-900/30', text: 'text-red-300', border: 'border-red-700' },
+};
+
+export function CopilotPanel({ summary, actionItems, contradictions }: CopilotPanelProps) {
+  const [expandedContradiction, setExpandedContradiction] = useState<number | null>(null);
+
   return (
     <div className="flex flex-col h-full gap-5">
+      {/* Contradiction Alerts */}
+      {contradictions.length > 0 && (
+        <div className="flex flex-col">
+          <h2 className="text-lg font-semibold text-gray-200 mb-3">
+            Contradictions
+            <span className="ml-2 text-sm font-normal text-gray-400">
+              ({contradictions.length})
+            </span>
+          </h2>
+          <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+            {contradictions.map((c, i) => {
+              const style = SEVERITY_STYLES[c.severity];
+              const isExpanded = expandedContradiction === i;
+              return (
+                <div
+                  key={i}
+                  className={`rounded-md p-3 text-sm border ${style.bg} ${style.border} cursor-pointer`}
+                  onClick={() => setExpandedContradiction(isExpanded ? null : i)}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <p className={`flex-1 ${style.text}`}>{c.description}</p>
+                    <span
+                      className={`shrink-0 px-2 py-0.5 rounded text-xs font-medium ${style.bg} ${style.text}`}
+                    >
+                      {c.severity}
+                    </span>
+                  </div>
+                  {isExpanded && (
+                    <div className="mt-2 space-y-1 text-xs text-gray-300">
+                      <p><span className="text-gray-400">Statement A:</span> {c.statement_a}</p>
+                      <p><span className="text-gray-400">Statement B:</span> {c.statement_b}</p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Summary Section */}
       <div className="flex-1 min-h-0 flex flex-col">
         <h2 className="text-lg font-semibold text-gray-200 mb-3">Summary</h2>
