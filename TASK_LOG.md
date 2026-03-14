@@ -102,12 +102,14 @@
 > Done: LLMDispatcher routes tasks to Ollama (light model for summary/action_items, heavy model for contradictions/reply/custom) with Claude API fallback. Heavy tasks try API first when enabled; light tasks fall back to API if Ollama fails. Anthropic SDK imported lazily (handles missing module). Fixed PROMPT_MAP keys to use "reply"/"custom" matching context_manager expectations. 24 tests pass covering routing, fallback chains, HTTP calls, prompt formatting, and init edge cases. 105 total tests pass.
 
 ### 3.3 Reasoning Workers
-- [ ] Create `backend/reasoning/workers/__init__.py`
-- [ ] Create `backend/reasoning/workers/base.py` — BaseWorker abstract class with `execute()` method
-- [ ] Create `backend/reasoning/workers/summary.py` — SummaryWorker: takes current_summary + new_segments, returns updated summary
-- [ ] Create `backend/reasoning/workers/action_items.py` — ActionItemWorker: extracts new items, updates existing ones, parses JSON response
-- [ ] Wire workers into ContextManager — when triggers fire, dispatch to appropriate worker, broadcast results
-- [ ] Write tests: `tests/test_workers.py` — mock dispatcher, verify workers format prompts correctly and parse responses
+- [x] Create `backend/reasoning/workers/__init__.py`
+- [x] Create `backend/reasoning/workers/base.py` — BaseWorker abstract class with `execute()` method
+- [x] Create `backend/reasoning/workers/summary.py` — SummaryWorker: takes current_summary + new_segments, returns updated summary
+- [x] Create `backend/reasoning/workers/action_items.py` — ActionItemWorker: extracts new items, updates existing ones, parses JSON response
+- [x] Wire workers into ContextManager — when triggers fire, dispatch to appropriate worker, broadcast results
+- [x] Write tests: `tests/test_workers.py` — mock dispatcher, verify workers format prompts correctly and parse responses
+
+> Done: BaseWorker ABC with abstract execute() method. SummaryWorker calls dispatcher with "summary" task, handles empty segments (returns current summary), replaces empty summary with placeholder for first run, strips whitespace. ActionItemWorker calls dispatcher with "action_items" task, parses JSON response (handles markdown code fences), creates new ActionItem objects with UUIDs, updates existing items' status, skips malformed entries, falls back to existing items on invalid JSON. ContextManager updated to use workers instead of calling dispatcher directly; _run_action_items now stores parsed ActionItem objects back into state. 16 new tests + 2 updated context_manager tests; 120 total pass (1 pre-existing fastapi import failure excluded).
 
 ### 3.4 Frontend — Copilot Panel
 - [ ] Create `frontend/src/hooks/useMeetingState.ts` — useReducer managing all message types from WebSocket

@@ -13,6 +13,8 @@ from backend.ws.protocol import (
     ActionItemsUpdate,
     CustomPromptResult,
 )
+from backend.reasoning.workers.summary import SummaryWorker
+from backend.reasoning.workers.action_items import ActionItemWorker
 
 
 @dataclass
@@ -103,6 +105,10 @@ class ContextManager:
         self.broadcast = broadcast_fn
         self._running_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
 
+        # Workers
+        self._summary_worker = SummaryWorker(dispatcher)
+        self._action_item_worker = ActionItemWorker(dispatcher)
+
         # Allow caller to override thresholds (e.g. from Settings or tests)
         if summary_every_n is not None:
             self.SUMMARY_EVERY_N_SEGMENTS = summary_every_n
@@ -163,8 +169,7 @@ class ContextManager:
         new_segments = self.state.get_transcript_text(
             last_n=self.SUMMARY_EVERY_N_SEGMENTS
         )
-        result = await self.dispatcher.run(
-            "summary",
+        result = await self._summary_worker.execute(
             current_summary=self.state.current_summary,
             new_segments=new_segments,
         )
@@ -177,12 +182,12 @@ class ContextManager:
         )
 
     async def _run_action_items(self) -> None:
-        result = await self.dispatcher.run(
-            "action_items",
+        updated_items = await self._action_item_worker.execute(
             full_context=self.state.get_full_context(),
             recent_transcript=self.state.get_transcript_text(last_n=10),
-            existing_items=str(self.state.action_items),
+            existing_items=self.state.action_items,
         )
+        self.state.action_items = updated_items
         await self.broadcast(
             ActionItemsUpdate(items=self.state.action_items).model_dump()
         )

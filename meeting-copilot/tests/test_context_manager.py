@@ -201,9 +201,10 @@ class TestContextManagerTriggers:
         for i in range(2):
             await cm.on_new_segment(make_segment(text=f"s{i}", start=float(i), end=float(i + 1)))
         await asyncio.sleep(0)
+        # SummaryWorker replaces empty summary with a placeholder for the LLM
         cm.dispatcher.run.assert_called_with(
             "summary",
-            current_summary="",
+            current_summary="(No summary yet — this is the first update.)",
             new_segments=cm.state.get_transcript_text(last_n=2),
         )
 
@@ -223,7 +224,8 @@ class TestContextManagerTriggers:
     @pytest.mark.asyncio
     async def test_action_scan_broadcasts_action_items_update(self):
         cm, broadcast_fn = self._make_manager(action_scan_every_n=2)
-        cm.dispatcher.run = AsyncMock(return_value="[]")
+        # ActionItemWorker expects JSON with new_items/updated_items structure
+        cm.dispatcher.run = AsyncMock(return_value='{"new_items": [], "updated_items": []}')
         for i in range(2):
             await cm.on_new_segment(make_segment(text=f"s{i}", start=float(i), end=float(i + 1)))
         await asyncio.sleep(0.01)
