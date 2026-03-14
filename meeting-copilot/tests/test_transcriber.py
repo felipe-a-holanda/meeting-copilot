@@ -231,7 +231,6 @@ class TestAudioPipeline:
         cfg = MagicMock()
         cfg.whisper_model = "tiny"
         cfg.language = "pt"
-        cfg.enable_diarization = False
         return cfg
 
     def _setup_pipeline(self, pipeline, transcript_text="Hello world", start=0.0, end=1.5):

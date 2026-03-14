@@ -91,10 +91,11 @@
   > Deleted `backend/audio/diarizer.py`. Removed `TestSpeakerDiarizer` class and its pyannote helpers from `test_diarizer.py` (the `TestAudioPipelineSpeakerLabel` class was kept). No import-level references remain; only comments in `recorder.py` and `config.py` mention pyannote in passing (cleaned up in 1B.4/1B.5). 253 tests pass, 3 pre-existing failures unchanged.
 
 ### 1B.4 Remove Diarization Config and Dependency
-- [ ] In `backend/config.py`, remove `enable_diarization: bool = True` and `hf_token: str = ""`
-- [ ] In `pyproject.toml`, remove `pyannote.audio>=3.1` from dependencies
-- [ ] Run `pip install -e .` (or equivalent) to verify install succeeds without pyannote
-- [ ] Run `pytest` — all existing tests must still pass
+- [x] In `backend/config.py`, remove `enable_diarization: bool = True` and `hf_token: str = ""`
+- [x] In `pyproject.toml`, remove `pyannote.audio>=3.1` from dependencies
+- [x] Run `pip install -e .` (or equivalent) to verify install succeeds without pyannote
+- [x] Run `pytest` — all existing tests must still pass
+  > Removed `enable_diarization` and `hf_token` from `config.py`. Removed `pyannote.audio>=3.1` from `pyproject.toml`. Cleaned `.env` and `.env.example` of diarization vars (they caused pydantic validation errors). Removed stale `cfg.enable_diarization = False` from `test_transcriber.py`. 286 tests pass (up from 244 — the prior 14 failures + 28 errors were all caused by the old env vars being rejected by pydantic).
 
 ### 1B.5 Update ARCHITECTURE.md
 - [ ] Update the Audio Capture section: replace "VAD → Whisper → Diarize" with "VAD → Whisper (per-stream)"

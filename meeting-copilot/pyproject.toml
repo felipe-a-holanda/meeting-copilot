@@ -11,7 +11,6 @@ dependencies = [
     "httpx>=0.27",
     "faster-whisper>=1.0",
     "whisperlivekit>=0.2,<0.3",
-    "pyannote.audio>=3.1",
     "silero-vad>=4.0",
     "anthropic>=0.40",
     "aiosqlite>=0.20",

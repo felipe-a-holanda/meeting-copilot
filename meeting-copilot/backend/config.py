@@ -5,7 +5,6 @@ class Settings(BaseSettings):
     # Audio Pipeline
     whisper_model: str = "turbo"
     language: str = "pt"                     # Default language (set to "" for auto-detect)
-    enable_diarization: bool = False
 
     # LLM - Local (Ollama)
     ollama_url: str = "http://localhost:11434"
@@ -27,9 +26,6 @@ class Settings(BaseSettings):
 
     # Storage
     db_path: str = "meetings.db"
-
-    # HuggingFace (needed for pyannote diarization models)
-    hf_token: str = ""
 
     class Config:
         env_file = ".env"
