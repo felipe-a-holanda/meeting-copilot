@@ -23,7 +23,7 @@ class TranscriptionResult:
 class WhisperTranscriber:
     """Wraps faster-whisper for transcribing PCM audio chunks."""
 
-    def __init__(self, model_size: str = "large-v3", language: str = "pt"):
+    def __init__(self, model_size: str = "large-v3-turbo", language: str = "pt"):
         self.model_size = model_size
         self.language = language or None  # None = auto-detect
         self._model = None

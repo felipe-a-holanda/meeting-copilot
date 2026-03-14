@@ -62,7 +62,7 @@ All settings are in `.env`. Copy `.env.example` to `.env` to start.
 
 | Variable | Default | Description |
 |---|---|---|
-| `WHISPER_MODEL` | `large-v3` | Whisper model size: `tiny`, `base`, `small`, `medium`, `large-v2`, `large-v3` |
+| `WHISPER_MODEL` | `large-v3-turbo` | Whisper model size: `tiny`, `base`, `small`, `medium`, `large-v2`, `large-v3`, `large-v3-turbo` |
 | `LANGUAGE` | `pt` | Transcription language (ISO 639-1). Leave blank for auto-detect. |
 | `ENABLE_DIARIZATION` | `true` | Speaker diarization (requires `HF_TOKEN`) |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama server URL |

@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # Audio Pipeline
-    whisper_model: str = "large-v3"
+    whisper_model: str = "large-v3-turbo"
     language: str = "pt"                     # Default language (set to "" for auto-detect)
     enable_diarization: bool = True
 
