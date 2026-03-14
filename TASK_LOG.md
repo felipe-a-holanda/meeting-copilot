@@ -20,18 +20,19 @@
   > Created `AudioRecorder` with dataclasses (`AudioDevice`, `DeviceDefaults`, `DeviceList`, `DependencyStatus`), async `_run_pactl` helper, `_parse_device_list`, `list_devices`, `get_defaults`, `check_dependencies`. 17 tests all passing.
 
 ### 1.2 ffmpeg Recording Subprocess
-- [ ] In `AudioRecorder`, implement `start()` method that launches ffmpeg as an async subprocess:
+- [x] In `AudioRecorder`, implement `start()` method that launches ffmpeg as an async subprocess:
   - Build the ffmpeg command: `-f pulse -i <mic> -f pulse -i <monitor> -filter_complex '[0:a]volume=<vol>[mic];[1:a][mic]amix=inputs=2:duration=longest:normalize=0' -ar 16000 -ac 1 -f s16le pipe:1`
   - If monitor source is unavailable, fall back to mic-only: `-f pulse -i <mic> -ar 16000 -ac 1 -f s16le pipe:1`
   - Store the `asyncio.subprocess.Process` reference
   - Set `self._is_recording = True`
-- [ ] Implement `stop()` method:
+- [x] Implement `stop()` method:
   - Send SIGINT to ffmpeg process (graceful shutdown)
   - Wait up to 5 seconds for process to exit, then SIGKILL if needed
   - Set `self._is_recording = False`
   - Return recording stats (duration, chunks processed)
-- [ ] Implement `is_recording` property and `recording_stats` property
-- [ ] Write tests: `tests/test_recorder_subprocess.py` — mock asyncio.create_subprocess_exec, verify correct ffmpeg command is built for various configs (with/without monitor, custom mic volume, custom sources). Verify stop sends SIGINT. Verify fallback to mic-only when monitor is missing.
+- [x] Implement `is_recording` property and `recording_stats` property
+- [x] Write tests: `tests/test_recorder_subprocess.py` — mock asyncio.create_subprocess_exec, verify correct ffmpeg command is built for various configs (with/without monitor, custom mic volume, custom sources). Verify stop sends SIGINT. Verify fallback to mic-only when monitor is missing.
+  > Added `RecordingStats` dataclass, `_build_ffmpeg_cmd`, `_build_ffmpeg_cmd_mic_only`, `start()`, `stop()`, and `recording_stats` property. `start()` uses `None` sentinel to distinguish "auto-detect" from explicit `""` (mic-only). `stop()` sends SIGINT, waits 5 s, then SIGKILL. 21 tests all passing.
 
 ### 1.3 Pipeline Integration — Reader Loop
 - [ ] In `AudioRecorder`, implement `_reader_loop()` — an async task that:
