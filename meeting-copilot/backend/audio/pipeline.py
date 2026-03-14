@@ -8,6 +8,7 @@ from typing import Awaitable, Callable
 
 import numpy as np
 
+from backend.audio.diarizer import SpeakerDiarizer
 from backend.audio.transcriber import WhisperTranscriber
 from backend.audio.vad import SileroVAD
 from backend.ws.protocol import TranscriptSegment
@@ -47,6 +48,14 @@ class AudioPipeline:
         )
         self._vad = SileroVAD()
         self._callback: SegmentCallback | None = None
+
+        # Diarization (optional — disabled if enable_diarization is False)
+        if getattr(config, "enable_diarization", False):
+            self._diarizer: SpeakerDiarizer | None = SpeakerDiarizer(
+                hf_token=getattr(config, "hf_token", "")
+            )
+        else:
+            self._diarizer = None
 
         # Rolling audio buffer — accumulates bytes until there is enough to transcribe
         self._buffer: np.ndarray = np.array([], dtype=_DTYPE)
@@ -130,11 +139,27 @@ class AudioPipeline:
         if not self._callback:
             return
 
+        # Diarize (optional) — run once per buffer on the same audio chunk
+        diarization: list = []
+        if self._diarizer is not None:
+            try:
+                diarization = self._diarizer.diarize(audio_f32, sample_rate=_SAMPLE_RATE)
+            except RuntimeError as exc:
+                logger.warning("Diarization failed, falling back to 'Speaker': %s", exc)
+
         for result in results:
             if not result.text:
                 continue
+
+            # Assign speaker label from diarization (mid-point of segment)
+            if diarization:
+                mid = (result.start + result.end) / 2.0
+                speaker = self._diarizer.get_speaker_at(diarization, mid)
+            else:
+                speaker = "Speaker"
+
             segment = TranscriptSegment(
-                speaker="Speaker",  # Diarization added in task 2.1
+                speaker=speaker,
                 text=result.text,
                 timestamp_start=chunk_start + result.start,
                 timestamp_end=chunk_start + result.end,

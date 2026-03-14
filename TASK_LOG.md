@@ -58,10 +58,12 @@
 ## Phase 2 — Diarization & Context Manager
 
 ### 2.1 Speaker Diarization
-- [ ] Create `backend/audio/diarizer.py` — pyannote wrapper that takes audio segments and returns speaker labels
-- [ ] Integrate diarizer into `AudioPipeline` — each TranscriptSegment now includes a speaker label
-- [ ] Handle diarization being optional (config flag `enable_diarization`) — if disabled, all segments get speaker="Speaker"
-- [ ] Write tests: `tests/test_diarizer.py` — mock pyannote pipeline, verify speaker labels are assigned
+- [x] Create `backend/audio/diarizer.py` — pyannote wrapper that takes audio segments and returns speaker labels
+- [x] Integrate diarizer into `AudioPipeline` — each TranscriptSegment now includes a speaker label
+- [x] Handle diarization being optional (config flag `enable_diarization`) — if disabled, all segments get speaker="Speaker"
+- [x] Write tests: `tests/test_diarizer.py` — mock pyannote pipeline, verify speaker labels are assigned
+
+> Done: SpeakerDiarizer wraps pyannote.audio Pipeline with lazy load (imports on first diarize() call). Returns sorted DiarizationResult list; get_speaker_at() finds speaker by timestamp mid-point. AudioPipeline initialises _diarizer only when enable_diarization=True; diarization RuntimeErrors fall back gracefully to "Speaker". 14 new tests pass (all mocked — no model downloads); 56 total pass.
 
 ### 2.2 Context Manager
 - [ ] Create `backend/reasoning/__init__.py`
