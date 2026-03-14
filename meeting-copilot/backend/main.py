@@ -1,9 +1,11 @@
 import asyncio
+import datetime
 import json
 import logging
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from backend.audio.pipeline import AudioPipeline
@@ -106,6 +108,86 @@ async def get_session(session_id: str) -> dict:
         "action_items": [item.model_dump() for item in data.action_items],
         "segments": [seg.model_dump() for seg in data.segments],
     }
+
+
+def _format_timestamp(seconds: float) -> str:
+    """Convert float seconds to HH:MM:SS string."""
+    total = int(seconds)
+    h, remainder = divmod(total, 3600)
+    m, s = divmod(remainder, 60)
+    if h:
+        return f"{h:02d}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
+
+def _export_markdown(data) -> str:
+    """Render a SessionData as a Markdown string."""
+    date_str = datetime.datetime.fromtimestamp(data.created_at).strftime("%Y-%m-%d %H:%M")
+    lines: list[str] = [
+        f"# {data.title}",
+        f"",
+        f"**Date:** {date_str}",
+        f"",
+    ]
+
+    # Summary
+    lines += ["## Summary", ""]
+    lines.append(data.summary if data.summary else "_No summary available._")
+    lines.append("")
+
+    # Action Items
+    lines += ["## Action Items", ""]
+    if data.action_items:
+        for item in data.action_items:
+            checkbox = "[x]" if item.status == "completed" else "[ ]"
+            assignee_part = f" — *{item.assignee}*" if item.assignee else ""
+            lines.append(f"- {checkbox} {item.description}{assignee_part}")
+    else:
+        lines.append("_No action items recorded._")
+    lines.append("")
+
+    # Transcript
+    lines += ["## Transcript", ""]
+    if data.segments:
+        for seg in data.segments:
+            ts = _format_timestamp(seg.timestamp_start)
+            lines.append(f"**{seg.speaker}** [{ts}]: {seg.text}")
+    else:
+        lines.append("_No transcript available._")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+@app.get("/sessions/{session_id}/export")
+async def export_session(
+    session_id: str,
+    format: str = Query(default="markdown", pattern="^(markdown|json)$"),
+) -> PlainTextResponse:
+    data = await session_store.load_session(session_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if format == "json":
+        payload = {
+            "id": data.id,
+            "title": data.title,
+            "created_at": data.created_at,
+            "updated_at": data.updated_at,
+            "summary": data.summary,
+            "action_items": [item.model_dump() for item in data.action_items],
+            "segments": [seg.model_dump() for seg in data.segments],
+        }
+        return PlainTextResponse(
+            content=json.dumps(payload, indent=2, ensure_ascii=False),
+            media_type="application/json",
+        )
+
+    # default: markdown
+    return PlainTextResponse(
+        content=_export_markdown(data),
+        media_type="text/markdown; charset=utf-8",
+    )
 
 
 @app.websocket("/ws/audio")

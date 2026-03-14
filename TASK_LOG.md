@@ -165,9 +165,11 @@
 > Done: SessionStore wraps aiosqlite with three tables (sessions, segments, meeting_state). create_session() auto-generates UUID + default title. save_segment() inserts rows and bumps updated_at. save_state() uses INSERT OR REPLACE for idempotent upserts. load_session() reconstructs full SessionData (segments ordered by timestamp). list_sessions() returns all sessions ordered by most recent first with segment counts via LEFT JOIN. REST endpoints added to main.py: POST /sessions (201), GET /sessions, GET /sessions/{id} (404 on miss). startup event calls init_db(). aiosqlite installed into .venv. 15 new tests; 158 total pass.
 
 ### 5.2 Meeting Export
-- [ ] Add export endpoint: `GET /sessions/{id}/export?format=markdown`
-- [ ] Generate markdown export: meeting title, date, summary, action items, full transcript with speaker labels
-- [ ] Add JSON export format option
+- [x] Add export endpoint: `GET /sessions/{id}/export?format=markdown`
+- [x] Generate markdown export: meeting title, date, summary, action items, full transcript with speaker labels
+- [x] Add JSON export format option
+
+> Done: Added `GET /sessions/{id}/export?format=markdown|json` endpoint to main.py. `_format_timestamp()` converts float seconds to HH:MM:SS. `_export_markdown()` renders title, date, summary (with placeholder if empty), action items with checkboxes (checked for completed), assignees, and full transcript with speaker labels and timestamps. JSON format returns pretty-printed JSON via PlainTextResponse with application/json content-type. Both return 404 for unknown sessions; invalid format triggers 422. 17 new tests; 192 total pass.
 
 ### 5.3 Frontend Polish
 - [ ] Add settings panel: toggle diarization, select Whisper model size, toggle API fallback
