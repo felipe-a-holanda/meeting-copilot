@@ -6,6 +6,14 @@ class Settings(BaseSettings):
     whisper_model: str = "turbo"
     language: str = "pt"                     # Default language (set to "" for auto-detect)
 
+    # Audio Capture (backend mode)
+    audio_capture_mode: str = "backend"      # "backend" | "browser" | "both"
+    recordings_dir: str = "./recordings"
+    mic_volume: float = 2.0
+    default_mic_source: str = ""             # Empty = auto-detect via pactl
+    default_monitor_source: str = ""         # Empty = auto-detect via pactl
+    save_recordings: bool = True
+
     # LLM - Local (Ollama)
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.1:8b"        # For summaries, action items

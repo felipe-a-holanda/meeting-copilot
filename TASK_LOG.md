@@ -109,15 +109,16 @@
 ## Phase 2 — REST API Endpoints
 
 ### 2.1 Configuration Updates
-- [ ] Add new fields to `Settings` in `backend/config.py`:
+- [x] Add new fields to `Settings` in `backend/config.py`:
   - `audio_capture_mode: str = "backend"` (values: "backend", "browser", "both")
   - `recordings_dir: str = "./recordings"`
   - `mic_volume: float = 2.0`
   - `default_mic_source: str = ""` (empty = auto-detect)
   - `default_monitor_source: str = ""` (empty = auto-detect)
   - `save_recordings: bool = True`
-- [ ] Update `.env.example` with the new variables documented
-- [ ] Write tests: verify Settings loads new fields from env vars with correct defaults
+- [x] Update `.env.example` with the new variables documented
+- [x] Write tests: verify Settings loads new fields from env vars with correct defaults
+  > Added 6 new fields to `Settings` in `config.py` under a new "Audio Capture" section. Updated `.env.example` with documented `AUDIO_CAPTURE_MODE`, `RECORDINGS_DIR`, `MIC_VOLUME`, `DEFAULT_MIC_SOURCE`, `DEFAULT_MONITOR_SOURCE`, `SAVE_RECORDINGS`. Created `tests/test_config_settings.py` with 17 tests (defaults + env overrides + existing fields unchanged). 270 tests pass, 1 pre-existing failure unchanged.
 
 ### 2.2 Device Discovery Endpoint
 - [ ] Add `GET /api/audio/devices` endpoint to `main.py`:
