@@ -152,15 +152,17 @@
 ## Phase 5 — Persistence, Polish & Packaging
 
 ### 5.1 Session Storage
-- [ ] Create `backend/storage/__init__.py`
-- [ ] Create `backend/storage/session.py` — SQLite via aiosqlite:
+- [x] Create `backend/storage/__init__.py`
+- [x] Create `backend/storage/session.py` — SQLite via aiosqlite:
   - `create_session()` — new meeting session
   - `save_segment()` — persist transcript segment
   - `save_state()` — persist summary + action items
   - `load_session()` — restore full meeting state
   - `list_sessions()` — list past meetings
-- [ ] Add REST endpoints: `GET /sessions`, `GET /sessions/{id}`, `POST /sessions`
-- [ ] Write tests: `tests/test_storage.py` — CRUD operations on SQLite
+- [x] Add REST endpoints: `GET /sessions`, `GET /sessions/{id}`, `POST /sessions`
+- [x] Write tests: `tests/test_storage.py` — CRUD operations on SQLite
+
+> Done: SessionStore wraps aiosqlite with three tables (sessions, segments, meeting_state). create_session() auto-generates UUID + default title. save_segment() inserts rows and bumps updated_at. save_state() uses INSERT OR REPLACE for idempotent upserts. load_session() reconstructs full SessionData (segments ordered by timestamp). list_sessions() returns all sessions ordered by most recent first with segment counts via LEFT JOIN. REST endpoints added to main.py: POST /sessions (201), GET /sessions, GET /sessions/{id} (404 on miss). startup event calls init_db(). aiosqlite installed into .venv. 15 new tests; 158 total pass.
 
 ### 5.2 Meeting Export
 - [ ] Add export endpoint: `GET /sessions/{id}/export?format=markdown`
