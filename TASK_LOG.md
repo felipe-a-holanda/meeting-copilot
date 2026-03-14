@@ -190,7 +190,9 @@
 > Done: main.py ws_audio wraps pipeline.process_audio_chunk in try/except to log errors without crashing the connection; ws_control catches generic Exception on control message processing. context_manager.py adds logging + wraps _run_summary/_run_action_items/_run_contradictions in try/except (log warning, skip); handle_custom_prompt/handle_reply_request catch failures and broadcast {type:"error"} to frontend. dispatcher.py adds asyncio.sleep-based exponential backoff (1s→2s, max 3 attempts) in _call_claude for 429/rate-limit errors. useWebSocket.ts already had exponential backoff reconnection. Created ErrorToast.tsx (auto-dismiss 5s, manual dismiss, error/warning/info styles); App.tsx wires handleControlMessage to intercept type="error" messages as toasts, useEffect surfaces audio capture errors as toasts. 7 new tests pass; 166 total pass. Frontend builds cleanly.
 
 ### 5.5 Packaging
-- [ ] Create `Dockerfile` for backend
-- [ ] Create `docker-compose.yml` — backend + Ollama (GPU passthrough)
-- [ ] Create `scripts/setup.sh` — automated setup (venv, deps, model downloads)
-- [ ] Update `README.md` — installation, configuration, usage instructions
+- [x] Create `Dockerfile` for backend
+- [x] Create `docker-compose.yml` — backend + Ollama (GPU passthrough)
+- [x] Create `scripts/setup.sh` — automated setup (venv, deps, model downloads)
+- [x] Update `README.md` — installation, configuration, usage instructions
+
+> Done: Dockerfile uses two-stage build (Node 20 builds frontend, Python 3.11-slim runs backend); mounts /data volume for SQLite. docker-compose.yml wires backend + ollama:latest with named volumes; NVIDIA GPU passthrough commented-in block ready to uncomment. scripts/setup.sh creates venv, installs deps, copies .env, installs frontend deps, pulls Ollama model, runs tests. README.md covers quick-start, Docker, full config table, API reference, WebSocket protocol, and development commands.
