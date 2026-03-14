@@ -66,13 +66,15 @@
 > Done: SpeakerDiarizer wraps pyannote.audio Pipeline with lazy load (imports on first diarize() call). Returns sorted DiarizationResult list; get_speaker_at() finds speaker by timestamp mid-point. AudioPipeline initialises _diarizer only when enable_diarization=True; diarization RuntimeErrors fall back gracefully to "Speaker". 14 new tests pass (all mocked — no model downloads); 56 total pass.
 
 ### 2.2 Context Manager
-- [ ] Create `backend/reasoning/__init__.py`
-- [ ] Create `backend/reasoning/context_manager.py` — MeetingState dataclass + ContextManager class with:
+- [x] Create `backend/reasoning/__init__.py`
+- [x] Create `backend/reasoning/context_manager.py` — MeetingState dataclass + ContextManager class with:
   - `on_new_segment()` — adds segment to state, checks triggers
   - `get_transcript_text()` — formatted transcript for LLM
   - `get_full_context()` — summary + action items + recent transcript
   - Trigger logic: configurable thresholds for summary/action/contradiction tasks
-- [ ] Write tests: `tests/test_context_manager.py` — add segments, verify trigger conditions fire at correct thresholds
+- [x] Write tests: `tests/test_context_manager.py` — add segments, verify trigger conditions fire at correct thresholds
+
+> Done: MeetingState dataclass tracks segments, speakers, summary, action items, recent_window (deque), and trigger counters. ContextManager fires background tasks (_fire_task) at configurable thresholds: summary every N segments, action scan every M segments. handle_custom_prompt() and handle_reply_request() dispatch on demand. 25 tests pass covering state accumulation, trigger firing/not-firing at boundaries, dispatcher calls, broadcast payloads, and custom/reply handlers.
 
 ### 2.3 Frontend — Speaker Labels
 - [ ] Update `TranscriptPanel.tsx` — show speaker name with distinct color per speaker
