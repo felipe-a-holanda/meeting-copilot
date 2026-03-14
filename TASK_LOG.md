@@ -1,198 +1,199 @@
-# TASK_LOG.md — Meeting Copilot Build Progress
+# TASK_LOG_REFACTOR.md — Backend Audio Capture Refactor
 
 > This file is the single source of truth for the autonomous build agent.
 > `[ ]` = pending | `[x]` = done | `[!]` = blocked
+>
+> **Context**: Read `ARCHITECTURE_REFACTOR.md` for full design details.
+> **Scope**: Move audio capture from browser (getUserMedia) to backend (PulseAudio + ffmpeg).
+> **Constraint**: The existing AudioPipeline, reasoning engine, and WebSocket control channel must remain unchanged. Only the audio source changes.
 
 ---
 
-## Phase 1 — Project Skeleton & Audio Pipeline
+## Phase 1 — Backend Audio Recorder
 
-### 1.1 Project Setup
-- [x] Create directory structure: `meeting-copilot/backend/`, `frontend/`, `scripts/`
-- [x] Create `pyproject.toml` with all Python dependencies
-- [x] Create `backend/__init__.py` files for all packages
-- [x] Create `backend/config.py` with `Settings` class (Pydantic BaseSettings, all config fields from ARCHITECTURE.md)
-- [x] Create `.env.example` with all environment variables documented
+### 1.1 PulseAudio Device Discovery
+- [x] Create `backend/audio/recorder.py` with an `AudioRecorder` class
+- [x] Implement `list_devices()` — run `pactl list sources short` and `pactl list sinks short` via `asyncio.create_subprocess_exec`, parse output into structured dicts
+- [x] Implement `get_defaults()` — run `pactl get-default-source` and `pactl get-default-sink`, derive monitor source name as `<default_sink>.monitor`
+- [x] Implement `check_dependencies()` — verify `pactl` and `ffmpeg` are available on PATH, return clear error messages if not
+- [x] Write tests: `tests/test_recorder_devices.py` — mock subprocess calls to pactl, verify parsing of device lists and defaults. Test edge cases: no monitor source found, empty device list, pactl not installed
+  > Created `AudioRecorder` with dataclasses (`AudioDevice`, `DeviceDefaults`, `DeviceList`, `DependencyStatus`), async `_run_pactl` helper, `_parse_device_list`, `list_devices`, `get_defaults`, `check_dependencies`. 17 tests all passing.
 
-> Done: Created full directory tree (backend/, audio/, reasoning/, reasoning/workers/, ws/, storage/, frontend/, scripts/, tests/). pyproject.toml includes all deps + dev extras. All __init__.py files in place. Settings class verified working with pydantic-settings. .env.example documents all 15 config vars with comments.
+### 1.2 ffmpeg Recording Subprocess
+- [ ] In `AudioRecorder`, implement `start()` method that launches ffmpeg as an async subprocess:
+  - Build the ffmpeg command: `-f pulse -i <mic> -f pulse -i <monitor> -filter_complex '[0:a]volume=<vol>[mic];[1:a][mic]amix=inputs=2:duration=longest:normalize=0' -ar 16000 -ac 1 -f s16le pipe:1`
+  - If monitor source is unavailable, fall back to mic-only: `-f pulse -i <mic> -ar 16000 -ac 1 -f s16le pipe:1`
+  - Store the `asyncio.subprocess.Process` reference
+  - Set `self._is_recording = True`
+- [ ] Implement `stop()` method:
+  - Send SIGINT to ffmpeg process (graceful shutdown)
+  - Wait up to 5 seconds for process to exit, then SIGKILL if needed
+  - Set `self._is_recording = False`
+  - Return recording stats (duration, chunks processed)
+- [ ] Implement `is_recording` property and `recording_stats` property
+- [ ] Write tests: `tests/test_recorder_subprocess.py` — mock asyncio.create_subprocess_exec, verify correct ffmpeg command is built for various configs (with/without monitor, custom mic volume, custom sources). Verify stop sends SIGINT. Verify fallback to mic-only when monitor is missing.
 
-### 1.2 WebSocket Protocol
-- [x] Create `backend/ws/protocol.py` with all Pydantic message models (TranscriptSegment, SummaryUpdate, ActionItemsUpdate, ContradictionAlert, ReplySuggestion, CustomPromptResult, RequestReplySuggestion, CustomPromptRequest)
-- [x] Create `backend/ws/gateway.py` with ConnectionManager class (connect, disconnect, broadcast)
-- [x] Write tests: `tests/test_protocol.py` — verify all models serialize/deserialize correctly
+### 1.3 Pipeline Integration — Reader Loop
+- [ ] In `AudioRecorder`, implement `_reader_loop()` — an async task that:
+  - Reads chunks from `self._process.stdout` (4096 bytes at a time, matching existing chunk size)
+  - Calls `self._pipeline.process_audio_chunk(chunk)` for each chunk
+  - Handles EOF (ffmpeg stopped) and errors
+  - Updates stats counters (chunks read, bytes read, duration)
+- [ ] In `start()`, create the reader loop as an `asyncio.Task` stored in `self._reader_task`
+- [ ] In `stop()`, cancel the reader task after ffmpeg exits, then call `self._pipeline.reset()` to flush
+- [ ] Write tests: `tests/test_recorder_integration.py` — create a mock subprocess with fake PCM data on stdout, verify chunks are forwarded to a mock pipeline. Test EOF handling. Test error during read.
 
-> Done: All 8 message models implemented with Literal type discriminators. ConnectionManager handles connect/disconnect/broadcast with dead-connection cleanup. 25 tests pass covering serialization, JSON round-trips, default values, and validation errors.
-
-### 1.3 FastAPI Skeleton
-- [x] Create `backend/main.py` with FastAPI app, both WebSocket endpoints (`/ws/audio`, `/ws/control`), and CORS middleware
-- [x] Verify server starts: `uvicorn backend.main:app --reload` runs without errors
-- [x] Create a simple health check endpoint `GET /health` that returns `{"status": "ok"}`
-
-> Done: Created backend/main.py with FastAPI app, CORS middleware (allow_origins=["*"]), /health returning {"status":"ok"}, /ws/audio receiving raw PCM bytes, /ws/control parsing RequestReplySuggestion and CustomPromptRequest messages. Server starts cleanly with uvicorn and health check confirmed via curl.
-
-### 1.4 Audio Pipeline — Transcription
-- [x] Create `backend/audio/__init__.py`
-- [x] Create `backend/audio/transcriber.py` — wrapper around faster-whisper that accepts PCM audio chunks and yields text segments with timestamps
-- [x] Create `backend/audio/vad.py` — Silero VAD wrapper that detects speech segments in audio chunks
-- [x] Create `backend/audio/pipeline.py` — AudioPipeline class that combines VAD + transcriber, accepts raw audio bytes, emits TranscriptSegment events via callback
-- [x] Write tests: `tests/test_transcriber.py` — feed a synthetic audio chunk (generate a sine wave with numpy), verify it processes without crashing (output text content doesn't matter for synthetic audio)
-- [x] Integration test: WebSocket audio endpoint receives bytes and the pipeline processes them
-
-> Done: WhisperTranscriber wraps faster-whisper with lazy model loading (import on first use). SileroVAD wraps torch.hub silero-vad with lazy load and fallback if torch unavailable. AudioPipeline accumulates int16 PCM bytes until MIN_CHUNK_SAMPLES (1s), gates on VAD, transcribes, emits TranscriptSegment via async callback. main.py wired up with audio_pipeline instance that receives bytes from /ws/audio. 17 new tests pass (all mocked — no model downloads needed); 42 total pass.
-
-### 1.5 Frontend — Audio Capture
-- [x] Initialize React app: `npx create-react-app frontend --template typescript`
-- [x] Install Tailwind CSS
-- [x] Create `frontend/src/types/messages.ts` — TypeScript interfaces matching all backend protocol models
-- [x] Create `frontend/src/hooks/useAudioCapture.ts` — WebAudio API capture, PCM encoding, WebSocket send
-- [x] Create `frontend/src/hooks/useWebSocket.ts` — generic WebSocket hook with auto-reconnection
-- [x] Create `frontend/src/components/AudioControls.tsx` — Start/Stop recording buttons
-- [x] Create `frontend/src/components/TranscriptPanel.tsx` — displays live transcript segments as they arrive
-- [x] Create `frontend/src/App.tsx` — layout with AudioControls + TranscriptPanel
-- [x] Verify: `npm run build` compiles successfully with no errors
-
-> Done: Initialized CRA TypeScript app in meeting-copilot/frontend/. Installed Tailwind CSS v3 (v4 lacks CLI binary, v3 works with create-react-app via PostCSS). Configured tailwind.config.js content paths and prepended @tailwind directives to index.css. Created types/messages.ts with all 9 interfaces matching backend/ws/protocol.py exact field names (timestamp_start/timestamp_end, is_partial, etc.). Created useWebSocket.ts with exponential backoff reconnection, useAudioCapture.ts with ScriptProcessorNode at 16kHz + Float32→Int16 PCM conversion. Created AudioControls.tsx and TranscriptPanel.tsx components. App.tsx wires everything together. `npm run build` compiles successfully: 62.89 kB JS + 2.65 kB CSS gzipped.
+### 1.4 Optional WAV File Saving
+- [ ] Add `save_to_file` parameter to `start()` — when provided, use ffmpeg tee muxer or a second output to write a WAV file alongside piping to stdout
+- [ ] The ffmpeg command becomes: `ffmpeg ... -f s16le pipe:1 -ar 16000 -ac 1 -c:a pcm_s16le <file_path>` (two outputs)
+- [ ] Create recordings directory structure: `<recordings_dir>/<YYYYMMDD>/meeting_<timestamp>/`
+- [ ] Write a JSON metadata sidecar file (same format as record_audio.sh): title, timestamp, audio_file, created_at, source
+- [ ] Write tests: verify ffmpeg command includes file output when `save_to_file=True`. Verify directory creation. Verify metadata JSON structure.
 
 ---
 
-## Phase 2 — Diarization & Context Manager
+## Phase 2 — REST API Endpoints
 
-### 2.1 Speaker Diarization
-- [x] Create `backend/audio/diarizer.py` — pyannote wrapper that takes audio segments and returns speaker labels
-- [x] Integrate diarizer into `AudioPipeline` — each TranscriptSegment now includes a speaker label
-- [x] Handle diarization being optional (config flag `enable_diarization`) — if disabled, all segments get speaker="Speaker"
-- [x] Write tests: `tests/test_diarizer.py` — mock pyannote pipeline, verify speaker labels are assigned
+### 2.1 Configuration Updates
+- [ ] Add new fields to `Settings` in `backend/config.py`:
+  - `audio_capture_mode: str = "backend"` (values: "backend", "browser", "both")
+  - `recordings_dir: str = "./recordings"`
+  - `mic_volume: float = 2.0`
+  - `default_mic_source: str = ""` (empty = auto-detect)
+  - `default_monitor_source: str = ""` (empty = auto-detect)
+  - `save_recordings: bool = True`
+- [ ] Update `.env.example` with the new variables documented
+- [ ] Write tests: verify Settings loads new fields from env vars with correct defaults
 
-> Done: SpeakerDiarizer wraps pyannote.audio Pipeline with lazy load (imports on first diarize() call). Returns sorted DiarizationResult list; get_speaker_at() finds speaker by timestamp mid-point. AudioPipeline initialises _diarizer only when enable_diarization=True; diarization RuntimeErrors fall back gracefully to "Speaker". 14 new tests pass (all mocked — no model downloads); 56 total pass.
+### 2.2 Device Discovery Endpoint
+- [ ] Add `GET /api/audio/devices` endpoint to `main.py`:
+  - Calls `AudioRecorder.list_devices()` and `AudioRecorder.get_defaults()`
+  - Returns JSON with sources, sinks, and defaults
+  - Returns 503 if pactl is not available (with clear error message)
+- [ ] Write tests: mock AudioRecorder.list_devices, verify endpoint response shape
 
-### 2.2 Context Manager
-- [x] Create `backend/reasoning/__init__.py`
-- [x] Create `backend/reasoning/context_manager.py` — MeetingState dataclass + ContextManager class with:
-  - `on_new_segment()` — adds segment to state, checks triggers
-  - `get_transcript_text()` — formatted transcript for LLM
-  - `get_full_context()` — summary + action items + recent transcript
-  - Trigger logic: configurable thresholds for summary/action/contradiction tasks
-- [x] Write tests: `tests/test_context_manager.py` — add segments, verify trigger conditions fire at correct thresholds
+### 2.3 Recording Control Endpoints
+- [ ] Instantiate `AudioRecorder` in `main.py` (wired to the existing `audio_pipeline`)
+- [ ] Add `POST /api/recording/start` endpoint:
+  - Accepts optional body: `title`, `mic_source`, `monitor_source`, `mic_volume`, `save_file`
+  - Creates a new session via `session_store.create_session()`
+  - Calls `recorder.start()` with the provided or default parameters
+  - Returns session_id, status, and active device names
+  - Returns 409 if already recording
+  - Returns 503 if dependencies (pactl/ffmpeg) are missing
+- [ ] Add `POST /api/recording/stop` endpoint:
+  - Calls `recorder.stop()`
+  - Returns session_id, duration, segments count, file path
+  - Returns 409 if not currently recording
+- [ ] Add `GET /api/recording/status` endpoint:
+  - Returns is_recording, session_id, duration, chunks/segments counts
+  - Returns status "idle" when not recording
+- [ ] Write tests: `tests/test_recording_endpoints.py` — test start/stop/status lifecycle with mocked AudioRecorder. Test error cases: start while already recording, stop when not recording, missing dependencies.
 
-> Done: MeetingState dataclass tracks segments, speakers, summary, action items, recent_window (deque), and trigger counters. ContextManager fires background tasks (_fire_task) at configurable thresholds: summary every N segments, action scan every M segments. handle_custom_prompt() and handle_reply_request() dispatch on demand. 25 tests pass covering state accumulation, trigger firing/not-firing at boundaries, dispatcher calls, broadcast payloads, and custom/reply handlers.
-
-### 2.3 Frontend — Speaker Labels
-- [x] Update `TranscriptPanel.tsx` — show speaker name with distinct color per speaker
-- [x] Create color mapping utility: assign consistent colors to speaker IDs
-
-> Done: Created `frontend/src/utils/speakerColors.ts` with a 12-color palette and a Map-based assignment that gives each unique speaker a consistent color. Updated `TranscriptPanel.tsx` to import `getSpeakerColor()` and apply it via inline style instead of the hardcoded `text-blue-400` class. `npm run build` compiles cleanly.
-
----
-
-## Phase 3 — LLM Reasoning
-
-### 3.1 Prompt Templates
-- [x] Create `backend/reasoning/prompts.py` — all prompt templates from ARCHITECTURE.md (PROGRESSIVE_SUMMARY, ACTION_ITEMS, CONTRADICTION_DETECTION, REPLY_SUGGESTION, CUSTOM_PROMPT_TEMPLATE)
-
-> Done: Created prompts.py with all 5 prompt templates matching ARCHITECTURE.md exactly, using double-brace escaping for JSON format strings. Added PROMPT_MAP dict mapping task names to templates for dispatcher lookup. All templates verified to format correctly with their expected variables. 81 existing tests still pass.
-
-### 3.2 LLM Dispatcher
-- [x] Create `backend/reasoning/dispatcher.py` — LLMDispatcher class with:
-  - `_call_ollama()` — async HTTP call to Ollama API
-  - `_call_claude()` — async call via Anthropic SDK
-  - `run()` — routes task to appropriate backend based on task type and config
-  - Proper error handling: timeout, connection refused, model not found
-- [x] Write tests: `tests/test_dispatcher.py` — mock HTTP responses, verify routing logic
-
-> Done: LLMDispatcher routes tasks to Ollama (light model for summary/action_items, heavy model for contradictions/reply/custom) with Claude API fallback. Heavy tasks try API first when enabled; light tasks fall back to API if Ollama fails. Anthropic SDK imported lazily (handles missing module). Fixed PROMPT_MAP keys to use "reply"/"custom" matching context_manager expectations. 24 tests pass covering routing, fallback chains, HTTP calls, prompt formatting, and init edge cases. 105 total tests pass.
-
-### 3.3 Reasoning Workers
-- [x] Create `backend/reasoning/workers/__init__.py`
-- [x] Create `backend/reasoning/workers/base.py` — BaseWorker abstract class with `execute()` method
-- [x] Create `backend/reasoning/workers/summary.py` — SummaryWorker: takes current_summary + new_segments, returns updated summary
-- [x] Create `backend/reasoning/workers/action_items.py` — ActionItemWorker: extracts new items, updates existing ones, parses JSON response
-- [x] Wire workers into ContextManager — when triggers fire, dispatch to appropriate worker, broadcast results
-- [x] Write tests: `tests/test_workers.py` — mock dispatcher, verify workers format prompts correctly and parse responses
-
-> Done: BaseWorker ABC with abstract execute() method. SummaryWorker calls dispatcher with "summary" task, handles empty segments (returns current summary), replaces empty summary with placeholder for first run, strips whitespace. ActionItemWorker calls dispatcher with "action_items" task, parses JSON response (handles markdown code fences), creates new ActionItem objects with UUIDs, updates existing items' status, skips malformed entries, falls back to existing items on invalid JSON. ContextManager updated to use workers instead of calling dispatcher directly; _run_action_items now stores parsed ActionItem objects back into state. 16 new tests + 2 updated context_manager tests; 120 total pass (1 pre-existing fastapi import failure excluded).
-
-### 3.4 Frontend — Copilot Panel
-- [x] Create `frontend/src/hooks/useMeetingState.ts` — useReducer managing all message types from WebSocket
-- [x] Create `frontend/src/components/CopilotPanel.tsx` — displays:
-  - Progressive summary (updates in place)
-  - Action items list (with assignee, status badges)
-- [x] Update `App.tsx` — two-column layout: TranscriptPanel (left) + CopilotPanel (right)
-
-> Done: Created `useMeetingState.ts` with useReducer handling all 6 server message types (transcript_segment, summary_update, action_items_update, contradiction_alert, reply_suggestion, custom_prompt_result) plus reset action. Created `CopilotPanel.tsx` displaying progressive summary (updates in place) and action items list with color-coded status badges (new=blue, updated=yellow, completed=green) and assignee display. Updated `App.tsx` to use useMeetingState hook instead of manual useState, two-column responsive grid layout (single column on mobile, side-by-side on lg+), max-w-7xl container. `npm run build` compiles cleanly.
+### 2.4 Wire Segments to Session Storage
+- [ ] When recording starts, wire `context_manager.on_new_segment` to also call `session_store.save_segment()` for the active session
+- [ ] When recording stops, save final meeting state (summary, action items) to session
+- [ ] Write tests: verify segments are persisted during a recording session
 
 ---
 
-## Phase 4 — Advanced Reasoning & Interactivity
+## Phase 3 — Frontend Updates
 
-### 4.1 Contradiction Detection
-- [x] Create `backend/reasoning/workers/contradictions.py` — ContradictionWorker: analyzes recent transcript against summary, parses JSON response
-- [x] Add time-based trigger in ContextManager — run contradiction check every N seconds
-- [x] Frontend: add contradiction alerts to CopilotPanel with severity badges and expandable details
+### 3.1 New Types and API Client
+- [ ] Add new TypeScript interfaces to `frontend/src/types/messages.ts`:
+  - `AudioDevice { name: string; description: string }`
+  - `DeviceListResponse { sources: AudioDevice[]; sinks: AudioDevice[]; defaults: { source: string; sink: string; monitor: string } }`
+  - `RecordingStartRequest { title?: string; mic_source?: string; monitor_source?: string; mic_volume?: number; save_file?: boolean }`
+  - `RecordingStartResponse { session_id: string; status: string; mic_source: string; monitor_source: string }`
+  - `RecordingStopResponse { session_id: string; status: string; duration_seconds: number; segments_count: number; file_path?: string }`
+  - `RecordingStatusResponse { is_recording: boolean; session_id?: string; duration_seconds: number; chunks_processed: number; segments_emitted: number }`
+- [ ] Verify `npm run build` compiles with no errors
 
-> Done: ContradictionWorker calls dispatcher with "contradictions" task, parses JSON response (handles markdown fences), skips malformed items, defaults unknown severity to "low". ContextManager already had `_last_contradiction_check` + `_run_contradictions()` wired; confirmed complete. CopilotPanel already had contradiction alerts UI with SEVERITY_STYLES (low/medium/high) and expandable statement details; App.tsx passes `state.contradictions` prop. Added 9 new ContradictionWorker tests; 127 total pass. Frontend builds cleanly (64.02 kB JS).
+### 3.2 Rewrite useAudioCapture Hook
+- [ ] Rewrite `frontend/src/hooks/useAudioCapture.ts`:
+  - Remove `getUserMedia`, `AudioContext`, `ScriptProcessor`, and WebSocket audio sending logic
+  - Replace with REST API calls to `/api/recording/start`, `/api/recording/stop`, `/api/recording/status`
+  - Expose: `start(options)`, `stop()`, `isRecording`, `status`, `devices`
+  - Add `fetchDevices()` that calls `GET /api/audio/devices`
+  - Add a polling interval (every 2s) for recording status while active
+- [ ] Verify `npm run build` compiles with no errors
 
-### 4.2 Reply Suggestions
-- [x] Create `backend/reasoning/workers/reply.py` — ReplyWorker: generates 2-3 reply suggestions based on meeting context
-- [x] Wire to `/ws/control` endpoint — handle `request_reply` messages
-- [x] Create `frontend/src/components/ReplyPanel.tsx` — shows suggestions with copy-to-clipboard buttons
-- [x] Add "Suggest Reply" button in UI that sends request via control WebSocket
+### 3.3 Device Picker Component
+- [ ] Create `frontend/src/components/DevicePicker.tsx`:
+  - Dropdown for microphone source (populated from `/api/audio/devices`)
+  - Dropdown for system audio source (monitor sources)
+  - Shows default selections
+  - "Refresh devices" button
+  - Slider or input for mic volume boost (default 2.0)
+- [ ] Verify `npm run build` compiles with no errors
 
-> Done: ReplyWorker calls dispatcher with "reply" task, parses JSON response (handles markdown fences, non-list suggestions, empty/non-string items), falls back to raw text on invalid JSON, always returns ReplySuggestion with triggered_by="manual". ContextManager.handle_reply_request() now uses ReplyWorker and broadcasts proper ReplySuggestion model_dump(). main.py wired with LLMDispatcher + ContextManager instances; control endpoint now calls context_manager.handle_reply_request() / handle_custom_prompt() via asyncio.create_task(); audio_pipeline.on_segment registered to context_manager.on_new_segment. ReplyPanel.tsx shows suggestions with copy-to-clipboard buttons and optional context hint input. App.tsx includes ReplyPanel in right column with handleRequestReplySuggestions callback. 10 new tests; 137 total pass. Frontend builds cleanly.
+### 3.4 Update AudioControls Component
+- [ ] Modify `frontend/src/components/AudioControls.tsx`:
+  - Replace browser audio capture UI with backend recording controls
+  - Integrate DevicePicker component
+  - Add "Meeting title" text input
+  - Start button calls `POST /api/recording/start` with selected devices and title
+  - Stop button calls `POST /api/recording/stop`
+  - Show recording duration (from status polling)
+  - Show recording indicator (pulsing red dot when recording)
+  - Handle errors: show toast when pactl/ffmpeg unavailable, when already recording, etc.
+- [ ] Verify `npm run build` compiles with no errors
 
-### 4.3 Custom Prompts
-- [x] Create `backend/reasoning/workers/custom.py` — CustomPromptWorker: runs user's freeform prompt against meeting context
-- [x] Wire to `/ws/control` endpoint — handle `custom_prompt` messages
-- [x] Create `frontend/src/components/PromptInput.tsx` — text input + send button, displays results inline
-- [x] Add prompt history display (shows previous prompts and their results)
-
-> Done: CustomPromptWorker wraps dispatcher.run("custom") call, returns CustomPromptResult with stripped result and timestamp. ContextManager.handle_custom_prompt() updated to use the worker instead of calling dispatcher directly. PromptInput.tsx shows text input + Ask button + prompt history (newest first, max-h-60 scrollable), wired into App.tsx with handleSendCustomPrompt callback that sends {type:"custom_prompt", prompt} over control WebSocket. 6 new CustomPromptWorker tests; 159 total pass (1 pre-existing fastapi import failure). Frontend builds cleanly.
+### 3.5 Remove Audio WebSocket from App.tsx
+- [ ] In `App.tsx`, conditionally connect the audio WebSocket based on capture mode:
+  - If backend mode: do not open `/ws/audio`, only open `/ws/control` for receiving transcripts and insights
+  - If browser mode (legacy): keep current behavior
+  - Read mode from a config or from `GET /settings` response
+- [ ] Verify `npm run build` compiles with no errors
 
 ---
 
-## Phase 5 — Persistence, Polish & Packaging
+## Phase 4 — Integration & Polish
 
-### 5.1 Session Storage
-- [x] Create `backend/storage/__init__.py`
-- [x] Create `backend/storage/session.py` — SQLite via aiosqlite:
-  - `create_session()` — new meeting session
-  - `save_segment()` — persist transcript segment
-  - `save_state()` — persist summary + action items
-  - `load_session()` — restore full meeting state
-  - `list_sessions()` — list past meetings
-- [x] Add REST endpoints: `GET /sessions`, `GET /sessions/{id}`, `POST /sessions`
-- [x] Write tests: `tests/test_storage.py` — CRUD operations on SQLite
+### 4.1 End-to-End Integration Test
+- [ ] Create `tests/test_e2e_recording.py`:
+  - Mock ffmpeg subprocess to produce known PCM audio data
+  - Start recording via REST API
+  - Verify chunks flow through pipeline
+  - Verify transcript segments are emitted and stored in session
+  - Stop recording via REST API
+  - Verify session has segments and status is correct
+- [ ] Run all existing tests to ensure nothing is broken (`pytest`)
 
-> Done: SessionStore wraps aiosqlite with three tables (sessions, segments, meeting_state). create_session() auto-generates UUID + default title. save_segment() inserts rows and bumps updated_at. save_state() uses INSERT OR REPLACE for idempotent upserts. load_session() reconstructs full SessionData (segments ordered by timestamp). list_sessions() returns all sessions ordered by most recent first with segment counts via LEFT JOIN. REST endpoints added to main.py: POST /sessions (201), GET /sessions, GET /sessions/{id} (404 on miss). startup event calls init_db(). aiosqlite installed into .venv. 15 new tests; 158 total pass.
+### 4.2 Update Setup Script
+- [ ] Update `scripts/setup.sh` to check for `pactl` and `ffmpeg` at the start
+- [ ] Add instructions for installing `pulseaudio-utils` and `ffmpeg` if missing
+- [ ] Add a test command that runs `pactl list sources short` and shows available devices
+- [ ] Verify the script runs without errors on a fresh checkout
 
-### 5.2 Meeting Export
-- [x] Add export endpoint: `GET /sessions/{id}/export?format=markdown`
-- [x] Generate markdown export: meeting title, date, summary, action items, full transcript with speaker labels
-- [x] Add JSON export format option
+### 4.3 Debug Endpoint Updates
+- [ ] Update `GET /debug` to include recording state:
+  - `is_recording`, `active_session_id`, `recording_duration`
+  - `audio_capture_mode` (backend/browser/both)
+  - `mic_source`, `monitor_source` (when recording)
+  - `ffmpeg_pid` (when recording)
+- [ ] Write tests: verify debug output includes recording info
 
-> Done: Added `GET /sessions/{id}/export?format=markdown|json` endpoint to main.py. `_format_timestamp()` converts float seconds to HH:MM:SS. `_export_markdown()` renders title, date, summary (with placeholder if empty), action items with checkboxes (checked for completed), assignees, and full transcript with speaker labels and timestamps. JSON format returns pretty-printed JSON via PlainTextResponse with application/json content-type. Both return 404 for unknown sessions; invalid format triggers 422. 17 new tests; 192 total pass.
+### 4.4 Settings Endpoint Updates
+- [ ] Update `GET /settings` and `POST /settings` to include new audio capture fields:
+  - `audio_capture_mode`
+  - `mic_volume`
+  - `save_recordings`
+- [ ] Update frontend `SettingsPanel.tsx` to show/edit these new settings
+- [ ] Verify `npm run build` compiles with no errors
 
-### 5.3 Frontend Polish
-- [x] Add settings panel: toggle diarization, select Whisper model size, toggle API fallback
-- [x] Add session list sidebar: browse and load past meetings
-- [x] Add responsive layout (mobile-friendly)
-- [x] Add dark mode support via Tailwind
-- [x] Connection status indicator (WebSocket connected/disconnected/reconnecting)
+### 4.5 Error Handling & Edge Cases
+- [ ] Handle ffmpeg crashing mid-recording: detect process exit, broadcast error to frontend, set recording state to idle
+- [ ] Handle PulseAudio device disappearing mid-recording (e.g., headphones unplugged): log warning, attempt to continue with remaining device
+- [ ] Handle concurrent start requests: return 409 Conflict
+- [ ] Handle server restart while recording: on startup, detect orphaned ffmpeg processes and clean up
+- [ ] Write tests for each error scenario
 
-> Done: SettingsPanel.tsx — right-side drawer with toggle switches (diarization, API fallback) and model size select; saves to localStorage + POSTs to /settings. SessionSidebar.tsx — left-side drawer fetching GET /sessions, renders session list with dates/segment counts, loads session via GET /sessions/{id} and dispatches load_session action to useMeetingState. useMeetingState: added load_session reducer case + loadSession callback. types/messages.ts: added SessionListItem and SessionData interfaces. darkMode: 'class' added to tailwind.config.js; App.tsx manages dark class on <html> with localStorage persistence and sun/moon SVG toggle button. Connection status: dedicated ConnectionDot component in App header showing audio + control WS status with animated pulse for connecting state; also shown in mobile status bar below header. Responsive: sticky header with sm: breakpoints, main grid uses lg:grid-cols-2 (single column on mobile), panels have sm:p-5 padding. Backend: added GET /settings and POST /settings endpoints with SettingsUpdate model; AudioPipeline.set_diarization_enabled() added for runtime toggle. Build: 67.33 kB JS. 192 backend tests pass.
-
-### 5.4 Error Handling & Resilience
-- [x] Backend: graceful WebSocket disconnection handling
-- [x] Backend: Ollama connection failure → log warning, skip reasoning tasks (don't crash)
-- [x] Backend: API rate limit handling with exponential backoff
-- [x] Frontend: WebSocket auto-reconnection with exponential backoff
-- [x] Frontend: error toast notifications for failures
-
-> Done: main.py ws_audio wraps pipeline.process_audio_chunk in try/except to log errors without crashing the connection; ws_control catches generic Exception on control message processing. context_manager.py adds logging + wraps _run_summary/_run_action_items/_run_contradictions in try/except (log warning, skip); handle_custom_prompt/handle_reply_request catch failures and broadcast {type:"error"} to frontend. dispatcher.py adds asyncio.sleep-based exponential backoff (1s→2s, max 3 attempts) in _call_claude for 429/rate-limit errors. useWebSocket.ts already had exponential backoff reconnection. Created ErrorToast.tsx (auto-dismiss 5s, manual dismiss, error/warning/info styles); App.tsx wires handleControlMessage to intercept type="error" messages as toasts, useEffect surfaces audio capture errors as toasts. 7 new tests pass; 166 total pass. Frontend builds cleanly.
-
-### 5.5 Packaging
-- [x] Create `Dockerfile` for backend
-- [x] Create `docker-compose.yml` — backend + Ollama (GPU passthrough)
-- [x] Create `scripts/setup.sh` — automated setup (venv, deps, model downloads)
-- [x] Update `README.md` — installation, configuration, usage instructions
-
-> Done: Dockerfile uses two-stage build (Node 20 builds frontend, Python 3.11-slim runs backend); mounts /data volume for SQLite. docker-compose.yml wires backend + ollama:latest with named volumes; NVIDIA GPU passthrough commented-in block ready to uncomment. scripts/setup.sh creates venv, installs deps, copies .env, installs frontend deps, pulls Ollama model, runs tests. README.md covers quick-start, Docker, full config table, API reference, WebSocket protocol, and development commands.
+### 4.6 Update Documentation
+- [ ] Update `README.md` with new system requirements (pactl, ffmpeg)
+- [ ] Add a "Backend Audio Capture" section explaining:
+  - How it works (PulseAudio monitor sources)
+  - How to select audio devices
+  - How to fall back to browser-only mode
+  - Troubleshooting: "no monitor source found", "ffmpeg not installed"
+- [ ] Update `docs/system-audio-capture-options.md` to note that Option C is now implemented
