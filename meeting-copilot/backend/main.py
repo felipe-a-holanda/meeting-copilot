@@ -48,7 +48,7 @@ dispatcher = LLMDispatcher(settings)
 
 async def _broadcast_to_clients(data: dict) -> None:
     """Broadcast a dict payload as JSON to all connected control clients."""
-    await control_manager.broadcast(json.dumps(data))
+    await control_manager.broadcast(data)
 
 
 async def _broadcast_error(message: str, *, context: str | None = None) -> None:
@@ -112,6 +112,25 @@ async def update_settings(body: SettingsUpdate) -> dict:
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/debug")
+async def debug_info() -> dict:
+    """Live pipeline diagnostics — useful for debugging recording/transcription issues."""
+    return {
+        "pipeline": audio_pipeline.stats.to_dict(audio_pipeline),
+        "settings": {
+            "whisper_model": settings.whisper_model,
+            "language": settings.language,
+            "enable_diarization": settings.enable_diarization,
+            "ollama_url": settings.ollama_url,
+            "ollama_model": settings.ollama_model,
+        },
+        "connections": {
+            "audio": len(audio_manager.active_connections),
+            "control": len(control_manager.active_connections),
+        },
+    }
 
 
 # --- Session REST endpoints ---

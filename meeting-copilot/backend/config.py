@@ -3,9 +3,9 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # Audio Pipeline
-    whisper_model: str = "large-v3-turbo"
+    whisper_model: str = "turbo"
     language: str = "pt"                     # Default language (set to "" for auto-detect)
-    enable_diarization: bool = True
+    enable_diarization: bool = False
 
     # LLM - Local (Ollama)
     ollama_url: str = "http://localhost:11434"

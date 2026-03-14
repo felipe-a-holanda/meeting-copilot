@@ -66,7 +66,10 @@ class SpeakerDiarizer:
             )
 
         waveform = torch.from_numpy(audio).unsqueeze(0)  # (1, samples)
-        annotation = self._pipeline({"waveform": waveform, "sample_rate": sample_rate})
+        output = self._pipeline({"waveform": waveform, "sample_rate": sample_rate})
+        # pyannote >= 3.x returns a DiarizeOutput dataclass; the actual
+        # Annotation lives in .speaker_diarization
+        annotation = getattr(output, "speaker_diarization", output)
 
         results: list[DiarizationResult] = []
         for segment, _, speaker in annotation.itertracks(yield_label=True):
@@ -111,6 +114,6 @@ class SpeakerDiarizer:
         logger.info("Loading pyannote diarization model: %s", self._MODEL_ID)
         self._pipeline = Pipeline.from_pretrained(
             self._MODEL_ID,
-            use_auth_token=self._hf_token or None,
+            token=self._hf_token or None,
         )
         logger.info("Diarization model loaded.")

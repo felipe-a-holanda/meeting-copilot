@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { AudioControls } from './components/AudioControls';
 import { TranscriptPanel } from './components/TranscriptPanel';
 import { CopilotPanel } from './components/CopilotPanel';
@@ -7,6 +7,7 @@ import { ReplyPanel } from './components/ReplyPanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { SessionSidebar } from './components/SessionSidebar';
 import { ErrorToast, Toast } from './components/ErrorToast';
+import { DebugPanel } from './components/DebugPanel';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useAudioCapture } from './hooks/useAudioCapture';
 import { useMeetingState } from './hooks/useMeetingState';
@@ -33,6 +34,17 @@ function App() {
   const [showSessions, setShowSessions] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
+  // Debug stats
+  const debugStatsRef = useRef({
+    audioChunksSent: 0,
+    audioBytesSent: 0,
+    messagesReceived: 0,
+    lastMessageType: null as string | null,
+    lastChunkSize: null as number | null,
+    recentMessages: [] as Array<{ type: string; ts: number; preview: string }>,
+  });
+  const [debugStats, setDebugStats] = useState(debugStatsRef.current);
+
   const addToast = useCallback((message: string, type: Toast['type'] = 'error') => {
     const id = `${Date.now()}-${Math.random()}`;
     setToasts(prev => [...prev, { id, message, type }]);
@@ -56,6 +68,13 @@ function App() {
   const handleControlMessage = useCallback((event: MessageEvent) => {
     try {
       const data = JSON.parse(event.data);
+      const s = debugStatsRef.current;
+      s.messagesReceived += 1;
+      s.lastMessageType = data.type ?? 'unknown';
+      const preview = JSON.stringify(data).slice(0, 80);
+      s.recentMessages = [{ type: data.type ?? 'unknown', ts: Date.now(), preview }, ...s.recentMessages].slice(0, 8);
+      setDebugStats({ ...s });
+
       if (data.type === 'error') {
         addToast(data.message || 'An error occurred', 'error');
         return;
@@ -69,12 +88,34 @@ function App() {
   const audioWs = useWebSocket(AUDIO_WS_URL);
   const controlWs = useWebSocket(CONTROL_WS_URL, { onMessage: handleControlMessage });
 
+  const { status: audioStatus, send: sendAudio, start: startAudio, disconnect: disconnectAudio } = audioWs;
+  const {
+    status: controlStatus,
+    send: sendControl,
+    start: startControl,
+    disconnect: disconnectControl,
+  } = controlWs;
+
+  useEffect(() => {
+    startAudio();
+    startControl();
+    return () => {
+      disconnectAudio();
+      disconnectControl();
+    };
+  }, [startAudio, startControl, disconnectAudio, disconnectControl]);
+
   const { isCapturing, error, start: startCapture, stop: stopCapture } = useAudioCapture({
     onAudioChunk: useCallback(
       (pcm: ArrayBuffer) => {
-        audioWs.send(pcm);
+        sendAudio(pcm);
+        const s = debugStatsRef.current;
+        s.audioChunksSent += 1;
+        s.audioBytesSent += pcm.byteLength;
+        s.lastChunkSize = pcm.byteLength;
+        setDebugStats({ ...s });
       },
-      [audioWs]
+      [sendAudio]
     ),
   });
 
@@ -83,29 +124,29 @@ function App() {
   }, [error, addToast]);
 
   const handleStart = useCallback(async () => {
-    audioWs.start();
-    controlWs.start();
+    startAudio();
+    startControl();
     await startCapture();
-  }, [audioWs, controlWs, startCapture]);
+  }, [startAudio, startControl, startCapture]);
 
   const handleStop = useCallback(() => {
     stopCapture();
-    audioWs.disconnect();
-    controlWs.disconnect();
-  }, [audioWs, controlWs, stopCapture]);
+    disconnectAudio();
+    disconnectControl();
+  }, [disconnectAudio, disconnectControl, stopCapture]);
 
   const handleRequestReplySuggestions = useCallback(
     (contextHint: string) => {
-      controlWs.send(JSON.stringify({ type: 'request_reply', context_hint: contextHint || null }));
+      sendControl(JSON.stringify({ type: 'request_reply', context_hint: contextHint || null }));
     },
-    [controlWs]
+    [sendControl]
   );
 
   const handleSendCustomPrompt = useCallback(
     (prompt: string) => {
-      controlWs.send(JSON.stringify({ type: 'custom_prompt', prompt }));
+      sendControl(JSON.stringify({ type: 'custom_prompt', prompt }));
     },
-    [controlWs]
+    [sendControl]
   );
 
   const handleLoadSession = useCallback(
@@ -118,6 +159,11 @@ function App() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-200">
       <ErrorToast toasts={toasts} onDismiss={dismissToast} />
+      <DebugPanel
+        audioWsStatus={audioWs.status}
+        controlWsStatus={controlWs.status}
+        stats={debugStats}
+      />
       {/* Overlays */}
       <SettingsPanel open={showSettings} onClose={() => setShowSettings(false)} />
       <SessionSidebar

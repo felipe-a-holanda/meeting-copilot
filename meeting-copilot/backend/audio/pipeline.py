@@ -28,6 +28,36 @@ _MIN_CHUNK_SAMPLES = int(_MIN_CHUNK_SECONDS * _SAMPLE_RATE)
 SegmentCallback = Callable[[TranscriptSegment], Awaitable[None]]
 
 
+class AudioPipelineStats:
+    """Counters for pipeline activity, exposed via /debug endpoint."""
+
+    def __init__(self) -> None:
+        self.chunks_received: int = 0
+        self.bytes_received: int = 0
+        self.vad_speech: int = 0
+        self.vad_no_speech: int = 0
+        self.vad_unavailable: int = 0
+        self.transcription_attempts: int = 0
+        self.transcription_results: int = 0
+        self.transcription_errors: int = 0
+        self.segments_emitted: int = 0
+
+    def to_dict(self, pipeline: "AudioPipeline") -> dict:
+        return {
+            "chunks_received": self.chunks_received,
+            "bytes_received": self.bytes_received,
+            "vad_speech": self.vad_speech,
+            "vad_no_speech": self.vad_no_speech,
+            "vad_unavailable": self.vad_unavailable,
+            "transcription_attempts": self.transcription_attempts,
+            "transcription_results": self.transcription_results,
+            "transcription_errors": self.transcription_errors,
+            "segments_emitted": self.segments_emitted,
+            "whisper_model_loaded": pipeline._transcriber._model is not None,
+            "whisper_model_size": pipeline._transcriber.model_size,
+        }
+
+
 class AudioPipeline:
     """Accepts raw PCM audio bytes and emits TranscriptSegment events.
 
@@ -48,6 +78,7 @@ class AudioPipeline:
         )
         self._vad = SileroVAD()
         self._callback: SegmentCallback | None = None
+        self.stats = AudioPipelineStats()
 
         # Diarization (optional — disabled if enable_diarization is False)
         if getattr(config, "enable_diarization", False):
@@ -85,6 +116,9 @@ class AudioPipeline:
         Args:
             chunk: Raw PCM bytes — int16, mono, 16 kHz, little-endian.
         """
+        self.stats.chunks_received += 1
+        self.stats.bytes_received += len(chunk)
+
         if self._meeting_start is None:
             self._meeting_start = time.monotonic()
 
@@ -127,10 +161,14 @@ class AudioPipeline:
             try:
                 has_speech = self._vad.is_speech(audio_f32)
                 if not has_speech:
+                    self.stats.vad_no_speech += 1
                     logger.debug("VAD: no speech in chunk, skipping transcription.")
                     return
+                else:
+                    self.stats.vad_speech += 1
             except RuntimeError:
                 # VAD unavailable (torch not installed) — proceed anyway
+                self.stats.vad_unavailable += 1
                 logger.debug("VAD unavailable, skipping VAD gate.")
 
         # Compute timestamp for the start of this chunk
@@ -139,9 +177,12 @@ class AudioPipeline:
         self._buffer_start_time += chunk_duration
 
         # Transcribe
+        self.stats.transcription_attempts += 1
         try:
             results = self._transcriber.transcribe(audio_f32)
+            self.stats.transcription_results += len(results)
         except RuntimeError as exc:
+            self.stats.transcription_errors += 1
             logger.warning("Transcription failed: %s", exc)
             return
 
@@ -175,6 +216,7 @@ class AudioPipeline:
                 language=result.language or self.config.language,
                 is_partial=result.is_partial,
             )
+            self.stats.segments_emitted += 1
             try:
                 await self._callback(segment)
             except Exception as exc:
