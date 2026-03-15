@@ -258,10 +258,11 @@
   > Added `_stopping` flag and `_active_stream_count` to `AudioRecorder`. `_reader_loop` now has a `finally` block that decrements the count on unexpected EOF; when count reaches 0, `_handle_crash()` is called (resets state, calls registered callback). Partial crash (one stream fails, other survives) just logs a warning. `stop()` sets `_stopping=True` first to suppress crash detection during graceful shutdown. In `main.py`: registered `_on_recorder_crash` callback (clears `_active_session_id`, broadcasts error). Added `_cleanup_orphaned_ffmpeg()` called on startup (pkill -f "ffmpeg.*-f pulse"). Created `tests/test_recorder_crash.py` with 13 tests. Updated E2E test helper to set `_stopping=True` before waiting for reader tasks (mock EOF != crash). 372 total tests, 0 failures.
 
 ### 4.6 Update Documentation
-- [ ] Update `README.md` with new system requirements (pactl, ffmpeg)
-- [ ] Add a "Backend Audio Capture" section explaining:
+- [x] Update `README.md` with new system requirements (pactl, ffmpeg)
+- [x] Add a "Backend Audio Capture" section explaining:
   - How it works (PulseAudio monitor sources)
   - How to select audio devices
   - How to fall back to browser-only mode
   - Troubleshooting: "no monitor source found", "ffmpeg not installed"
-- [ ] Update `docs/system-audio-capture-options.md` to note that Option C is now implemented
+- [x] Update `docs/system-audio-capture-options.md` to note that Option C is now implemented
+  > Rewrote `README.md`: removed all diarization/HF_TOKEN references, updated Requirements (added pactl+ffmpeg with per-distro install commands), updated Quick Start, added "Backend Audio Capture" section (how it works, device selection, browser fallback, troubleshooting), updated config table (added 6 new audio vars, removed ENABLE_DIARIZATION/HF_TOKEN), updated API table (added 4 new recording endpoints), added `recording_error` WS message type. Updated `docs/system-audio-capture-options.md`: rewrote Option C description (shell script → integrated backend), updated Recommendation table to show Option C as ✅ implemented. Tests unchanged at 372 passing.
