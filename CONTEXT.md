@@ -3,7 +3,7 @@
 
 ## Estado Atual
 - **Fase**: 4 — Integration & Polish (in progress)
-- **Última tarefa**: 4.1 End-to-End Integration Test
+- **Última tarefa**: 4.2 Update Setup Script
 - **Testes passando**: 341 (backend); frontend build clean
 
 ## Decisões Técnicas

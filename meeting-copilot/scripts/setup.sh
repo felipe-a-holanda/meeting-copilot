@@ -8,6 +8,53 @@ cd "$PROJECT_DIR"
 echo "=== Meeting Copilot Setup ==="
 echo "Project root: $PROJECT_DIR"
 
+# ── System dependency checks ──────────────────────────────────────────────────
+MISSING_DEPS=()
+
+check_dep() {
+    local cmd="$1" pkg="$2"
+    if ! command -v "$cmd" &>/dev/null; then
+        echo "  MISSING: $cmd (install: $pkg)"
+        MISSING_DEPS+=("$cmd")
+    else
+        echo "  OK: $cmd ($(command -v "$cmd"))"
+    fi
+}
+
+echo "Checking system dependencies for backend audio capture..."
+check_dep pactl "sudo apt-get install pulseaudio-utils  # Ubuntu/Debian"
+check_dep ffmpeg "sudo apt-get install ffmpeg           # Ubuntu/Debian"
+
+if [[ ${#MISSING_DEPS[@]} -gt 0 ]]; then
+    echo ""
+    echo "WARNING: The following system tools are required for backend audio capture:"
+    for dep in "${MISSING_DEPS[@]}"; do
+        case "$dep" in
+            pactl)
+                echo "  • pactl  — PulseAudio control tool"
+                echo "    Ubuntu/Debian: sudo apt-get install pulseaudio-utils"
+                echo "    Arch:          sudo pacman -S libpulse"
+                echo "    Fedora:        sudo dnf install pulseaudio-utils"
+                ;;
+            ffmpeg)
+                echo "  • ffmpeg — audio/video capture tool"
+                echo "    Ubuntu/Debian: sudo apt-get install ffmpeg"
+                echo "    Arch:          sudo pacman -S ffmpeg"
+                echo "    Fedora:        sudo dnf install ffmpeg"
+                ;;
+        esac
+    done
+    echo ""
+    echo "The application will still install, but recording will fail at runtime."
+    echo "Install the above tools, then re-run this script (or start the server)."
+    echo ""
+else
+    echo ""
+    echo "Listing available PulseAudio sources (microphones + monitors):"
+    pactl list sources short 2>/dev/null | awk '{printf "  %s\n", $2}' || echo "  (pactl list sources failed — PulseAudio may not be running)"
+    echo ""
+fi
+
 # ── Python version check ──────────────────────────────────────────────────────
 REQUIRED_MAJOR=3
 REQUIRED_MINOR=11
@@ -84,7 +131,7 @@ echo "Installing Python dependencies..."
 if [[ ! -f ".env" ]]; then
     echo "Creating .env from .env.example..."
     cp .env.example .env
-    echo "  !! Edit .env to set ANTHROPIC_API_KEY and HF_TOKEN before running."
+    echo "  !! Edit .env to set ANTHROPIC_API_KEY before running."
 fi
 
 # ── Node / frontend ───────────────────────────────────────────────────────────

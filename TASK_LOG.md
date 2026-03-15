@@ -225,10 +225,11 @@
   > Created `tests/test_e2e_recording.py` with 8 E2E tests covering: chunk forwarding with correct speaker labels ("Me"/"Them"), segment persistence in real SQLite, stop response segment count, dual-stream speaker label verification, lifecycle/state clearing after stop, session title propagation, duplicate-start 409 rejection. Mocks used: `asyncio.create_subprocess_exec` (fake PCM stdout), `AudioRecorder.check_dependencies`, `audio_pipeline._vad.is_speech`, `audio_pipeline._transcriber.transcribe`, `context_manager.on_new_segment`. Autouse fixture resets recorder+pipeline state between tests. All 341 tests pass (333 prior + 8 new).
 
 ### 4.2 Update Setup Script
-- [ ] Update `scripts/setup.sh` to check for `pactl` and `ffmpeg` at the start
-- [ ] Add instructions for installing `pulseaudio-utils` and `ffmpeg` if missing
-- [ ] Add a test command that runs `pactl list sources short` and shows available devices
-- [ ] Verify the script runs without errors on a fresh checkout
+- [x] Update `scripts/setup.sh` to check for `pactl` and `ffmpeg` at the start
+- [x] Add instructions for installing `pulseaudio-utils` and `ffmpeg` if missing
+- [x] Add a test command that runs `pactl list sources short` and shows available devices
+- [x] Verify the script runs without errors on a fresh checkout
+  > Added `check_dep` helper and a "System dependency checks" section at the top of `setup.sh`. Checks for `pactl` and `ffmpeg`; prints per-distro install commands for each missing tool (Ubuntu/Debian, Arch, Fedora). When all deps are present, runs `pactl list sources short` and displays source names. Also removed stale HF_TOKEN reference from the .env message. `bash -n` syntax check passes; dry-run confirms correct output on this machine. All 341 tests pass.
 
 ### 4.3 Debug Endpoint Updates
 - [ ] Update `GET /debug` to include recording state:
