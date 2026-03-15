@@ -3,8 +3,8 @@
 
 ## Estado Atual
 - **Fase**: 4 — Integration & Polish (in progress)
-- **Última tarefa**: 4.3 Debug Endpoint Updates
-- **Testes passando**: 349 (backend); frontend build clean
+- **Última tarefa**: 4.4 Settings Endpoint Updates
+- **Testes passando**: 359 (backend); frontend build clean
 
 ## Decisões Técnicas
 - `audio_capture_mode` added to `GET /settings` response; `App.tsx` fetches it on mount. Audio WS (`/ws/audio`) is only opened for `browser` or `both` modes — never opened in default `backend` mode.
@@ -15,7 +15,7 @@
 - `_segment_handler` in `main.py` wraps `context_manager.on_new_segment` + `session_store.save_segment` — registered as the single `audio_pipeline.on_segment` callback. Avoids multi-callback complexity in pipeline.
 
 ## Problemas Conhecidos / Armadilhas
-- `main.py` `POST /settings` still calls `audio_pipeline.set_diarization_enabled()` — removed in Phase 1B but the update_settings handler wasn't cleaned up. Pre-existing issue; `GET /debug` stale `enable_diarization` reference was fixed in 4.3.
+- `settings.whisper_model_size` does not exist — the real attribute is `settings.whisper_model`. Same for `settings.use_claude_api_fallback` → `settings.use_api_fallback`. Fixed in 4.4; `GET /settings` was returning wrong values before.
 - Speaker label "Me"/"Them" requires two ffmpeg processes. If monitor source is unavailable, only mic stream runs (all chunks labeled "Me").
 - E2E tests use `autouse` async fixture to reset module-level `audio_recorder` and `audio_pipeline` state between tests; required because both are singletons in `main.py`.
 

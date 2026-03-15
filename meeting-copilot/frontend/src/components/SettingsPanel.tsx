@@ -3,15 +3,19 @@ import React, { useState } from 'react';
 const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 export interface AppSettings {
-  enableDiarization: boolean;
+  audioCaptureMode: 'backend' | 'browser' | 'both';
   whisperModelSize: 'turbo' | 'tiny' | 'small' | 'medium' | 'large';
   useClaudeApiFallback: boolean;
+  micVolume: number;
+  saveRecordings: boolean;
 }
 
 const DEFAULTS: AppSettings = {
-  enableDiarization: true,
+  audioCaptureMode: 'backend',
   whisperModelSize: 'small',
   useClaudeApiFallback: false,
+  micVolume: 2.0,
+  saveRecordings: true,
 };
 
 export function loadAppSettings(): AppSettings {
@@ -38,9 +42,11 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          enable_diarization: settings.enableDiarization,
           whisper_model_size: settings.whisperModelSize,
           use_claude_api_fallback: settings.useClaudeApiFallback,
+          audio_capture_mode: settings.audioCaptureMode,
+          mic_volume: settings.micVolume,
+          save_recordings: settings.saveRecordings,
         }),
       });
     } catch {
@@ -68,23 +74,68 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         </div>
 
         <div className="flex flex-col gap-4">
-          {/* Diarization toggle */}
+          {/* Audio capture mode */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-200">
+              Audio Capture Mode
+            </label>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Backend: PulseAudio via ffmpeg (recommended)
+            </p>
+            <select
+              value={settings.audioCaptureMode}
+              onChange={e =>
+                setSettings(s => ({
+                  ...s,
+                  audioCaptureMode: e.target.value as AppSettings['audioCaptureMode'],
+                }))
+              }
+              className="bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="backend">Backend (PulseAudio + ffmpeg)</option>
+              <option value="browser">Browser (getUserMedia)</option>
+              <option value="both">Both</option>
+            </select>
+          </div>
+
+          {/* Mic volume */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-200">
+              Mic Volume Boost: {settings.micVolume.toFixed(1)}×
+            </label>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Amplify microphone input</p>
+            <input
+              type="range"
+              min={0.5}
+              max={5.0}
+              step={0.1}
+              value={settings.micVolume}
+              onChange={e => setSettings(s => ({ ...s, micVolume: parseFloat(e.target.value) }))}
+              className="w-full accent-indigo-600"
+            />
+            <div className="flex justify-between text-xs text-gray-400">
+              <span>0.5×</span>
+              <span>5.0×</span>
+            </div>
+          </div>
+
+          {/* Save recordings toggle */}
           <label className="flex items-center justify-between gap-3 cursor-pointer">
             <div>
-              <p className="text-sm font-medium text-gray-700 dark:text-gray-200">Speaker Diarization</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Identify individual speakers</p>
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-200">Save Recordings</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Write WAV files to disk</p>
             </div>
             <button
               role="switch"
-              aria-checked={settings.enableDiarization}
-              onClick={() => setSettings(s => ({ ...s, enableDiarization: !s.enableDiarization }))}
+              aria-checked={settings.saveRecordings}
+              onClick={() => setSettings(s => ({ ...s, saveRecordings: !s.saveRecordings }))}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                settings.enableDiarization ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-600'
+                settings.saveRecordings ? 'bg-indigo-600' : 'bg-gray-300 dark:bg-gray-600'
               }`}
             >
               <span
                 className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  settings.enableDiarization ? 'translate-x-6' : 'translate-x-1'
+                  settings.saveRecordings ? 'translate-x-6' : 'translate-x-1'
                 }`}
               />
             </button>

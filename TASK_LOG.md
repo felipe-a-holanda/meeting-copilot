@@ -241,12 +241,13 @@
   > Updated `debug_info()` in `main.py`: removed stale `enable_diarization` reference, added `audio_capture_mode` to settings section, added new `recording` section with `is_recording`, `active_session_id`, `recording_duration`, `mic_source`, `monitor_source`, and `ffmpeg_pids` (dict with `mic` and `monitor` PIDs). Created `tests/test_debug_endpoint.py` with 8 tests covering idle state, recording state, dual-process PIDs, mic-only PIDs, duration, and connections section. 349 tests total, 0 failures.
 
 ### 4.4 Settings Endpoint Updates
-- [ ] Update `GET /settings` and `POST /settings` to include new audio capture fields:
+- [x] Update `GET /settings` and `POST /settings` to include new audio capture fields:
   - `audio_capture_mode`
   - `mic_volume`
   - `save_recordings`
-- [ ] Update frontend `SettingsPanel.tsx` to show/edit these new settings
-- [ ] Verify `npm run build` compiles with no errors
+- [x] Update frontend `SettingsPanel.tsx` to show/edit these new settings
+- [x] Verify `npm run build` compiles with no errors
+  > Updated `SettingsUpdate` model in `main.py`: removed `enable_diarization`, added `audio_capture_mode`, `mic_volume`, `save_recordings`. `GET /settings` now returns all 5 fields (fixed stale `settings.whisper_model_size` → `settings.whisper_model` and `settings.use_claude_api_fallback` → `settings.use_api_fallback`). `POST /settings` handler processes all new fields. Rewrote `SettingsPanel.tsx`: removed diarization toggle, added Audio Capture Mode dropdown, Mic Volume slider, and Save Recordings toggle. Created `tests/test_settings_endpoint.py` with 10 tests. 359 total backend tests, 0 failures; frontend build clean.
 
 ### 4.5 Error Handling & Edge Cases
 - [ ] Handle ffmpeg crashing mid-recording: detect process exit, broadcast error to frontend, set recording state to idle

@@ -82,9 +82,11 @@ class CreateSessionRequest(BaseModel):
 
 
 class SettingsUpdate(BaseModel):
-    enable_diarization: bool | None = None
     whisper_model_size: str | None = None
     use_claude_api_fallback: bool | None = None
+    audio_capture_mode: str | None = None
+    mic_volume: float | None = None
+    save_recordings: bool | None = None
 
 
 class RecordingStartRequest(BaseModel):
@@ -110,24 +112,29 @@ async def get_settings() -> dict:
             "audio_capture_mode", settings.audio_capture_mode
         ),
         "whisper_model_size": _runtime_settings.get(
-            "whisper_model_size", settings.whisper_model_size
+            "whisper_model_size", settings.whisper_model
         ),
         "use_claude_api_fallback": _runtime_settings.get(
-            "use_claude_api_fallback", settings.use_claude_api_fallback
+            "use_claude_api_fallback", settings.use_api_fallback
         ),
+        "mic_volume": _runtime_settings.get("mic_volume", settings.mic_volume),
+        "save_recordings": _runtime_settings.get("save_recordings", settings.save_recordings),
     }
 
 
 @app.post("/settings")
 async def update_settings(body: SettingsUpdate) -> dict:
-    if body.enable_diarization is not None:
-        _runtime_settings["enable_diarization"] = body.enable_diarization
-        audio_pipeline.set_diarization_enabled(body.enable_diarization)
     if body.whisper_model_size is not None:
         _runtime_settings["whisper_model_size"] = body.whisper_model_size
     if body.use_claude_api_fallback is not None:
         _runtime_settings["use_claude_api_fallback"] = body.use_claude_api_fallback
         dispatcher.use_api_fallback = body.use_claude_api_fallback
+    if body.audio_capture_mode is not None:
+        _runtime_settings["audio_capture_mode"] = body.audio_capture_mode
+    if body.mic_volume is not None:
+        _runtime_settings["mic_volume"] = body.mic_volume
+    if body.save_recordings is not None:
+        _runtime_settings["save_recordings"] = body.save_recordings
     return {"status": "ok", **_runtime_settings}
 
 
