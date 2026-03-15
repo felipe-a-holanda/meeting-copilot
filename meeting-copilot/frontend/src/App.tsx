@@ -13,7 +13,6 @@ import { useAudioCapture } from './hooks/useAudioCapture';
 import { useMeetingState } from './hooks/useMeetingState';
 import { SessionData } from './types/messages';
 
-const AUDIO_WS_URL = process.env.REACT_APP_AUDIO_WS_URL || 'ws://localhost:8000/ws/audio';
 const CONTROL_WS_URL = process.env.REACT_APP_CONTROL_WS_URL || 'ws://localhost:8000/ws/control';
 
 function ConnectionDot({ status }: { status: 'connecting' | 'connected' | 'disconnected' }) {
@@ -85,55 +84,36 @@ function App() {
     handleMessage(event);
   }, [handleMessage, addToast]);
 
-  const audioWs = useWebSocket(AUDIO_WS_URL);
   const controlWs = useWebSocket(CONTROL_WS_URL, { onMessage: handleControlMessage });
 
-  const { status: audioStatus, send: sendAudio, start: startAudio, disconnect: disconnectAudio } = audioWs;
   const {
-    status: controlStatus,
     send: sendControl,
     start: startControl,
     disconnect: disconnectControl,
   } = controlWs;
 
   useEffect(() => {
-    startAudio();
     startControl();
     return () => {
-      disconnectAudio();
       disconnectControl();
     };
-  }, [startAudio, startControl, disconnectAudio, disconnectControl]);
+  }, [startControl, disconnectControl]);
 
-  const { isCapturing, error, start: startCapture, stop: stopCapture } = useAudioCapture({
-    onAudioChunk: useCallback(
-      (pcm: ArrayBuffer) => {
-        sendAudio(pcm);
-        const s = debugStatsRef.current;
-        s.audioChunksSent += 1;
-        s.audioBytesSent += pcm.byteLength;
-        s.lastChunkSize = pcm.byteLength;
-        setDebugStats({ ...s });
-      },
-      [sendAudio]
-    ),
-  });
+  const { isRecording, error, start: startCapture, stop: stopCapture } = useAudioCapture();
 
   useEffect(() => {
     if (error) addToast(error, 'error');
   }, [error, addToast]);
 
   const handleStart = useCallback(async () => {
-    startAudio();
     startControl();
     await startCapture();
-  }, [startAudio, startControl, startCapture]);
+  }, [startControl, startCapture]);
 
-  const handleStop = useCallback(() => {
-    stopCapture();
-    disconnectAudio();
+  const handleStop = useCallback(async () => {
+    await stopCapture();
     disconnectControl();
-  }, [disconnectAudio, disconnectControl, stopCapture]);
+  }, [disconnectControl, stopCapture]);
 
   const handleRequestReplySuggestions = useCallback(
     (contextHint: string) => {
@@ -160,7 +140,7 @@ function App() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-200">
       <ErrorToast toasts={toasts} onDismiss={dismissToast} />
       <DebugPanel
-        audioWsStatus={audioWs.status}
+        audioWsStatus={controlWs.status}
         controlWsStatus={controlWs.status}
         stats={debugStats}
       />
@@ -199,10 +179,6 @@ function App() {
 
           {/* Connection status — desktop only */}
           <div className="hidden sm:flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-            <span className="flex items-center gap-1.5">
-              <ConnectionDot status={audioWs.status} />
-              Audio
-            </span>
             <span className="flex items-center gap-1.5">
               <ConnectionDot status={controlWs.status} />
               Control
@@ -261,10 +237,6 @@ function App() {
         {/* Mobile connection status bar */}
         <div className="sm:hidden max-w-7xl mx-auto flex items-center gap-4 pt-1 text-xs text-gray-500 dark:text-gray-400">
           <span className="flex items-center gap-1.5">
-            <ConnectionDot status={audioWs.status} />
-            Audio {audioWs.status}
-          </span>
-          <span className="flex items-center gap-1.5">
             <ConnectionDot status={controlWs.status} />
             Control {controlWs.status}
           </span>
@@ -274,8 +246,8 @@ function App() {
       {/* Main content */}
       <main className="max-w-7xl mx-auto p-3 sm:p-6 flex flex-col gap-4 sm:gap-6">
         <AudioControls
-          isCapturing={isCapturing}
-          wsStatus={audioWs.status}
+          isCapturing={isRecording}
+          wsStatus={controlWs.status}
           error={error}
           onStart={handleStart}
           onStop={handleStop}

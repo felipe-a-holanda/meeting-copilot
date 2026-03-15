@@ -3,7 +3,7 @@
 
 ## Estado Atual
 - **Fase**: 3 — Frontend Updates
-- **Última tarefa**: 3.1 New Types and API Client
+- **Última tarefa**: 3.2 Rewrite useAudioCapture Hook
 - **Testes passando**: 333 (backend); frontend build clean
 
 ## Decisões Técnicas
@@ -22,4 +22,6 @@
 - `backend/audio/recorder.py` — AudioRecorder with dual ffmpeg streams
 - `backend/audio/pipeline.py` — AudioPipeline with speaker_label passthrough
 - `backend/storage/session.py` — SessionStore (SQLite via aiosqlite)
+- `frontend/src/hooks/useAudioCapture.ts` — REST-based recording hook (no getUserMedia)
+- `frontend/src/App.tsx` — audio WS removed; only control WS remains
 - `TASK_LOG.md` — ground truth for what to do next

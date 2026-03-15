@@ -169,13 +169,14 @@
   > Added 6 new interfaces to `messages.ts` under a new "Audio Device / Recording API types" section. `npm run build` succeeds with no TypeScript errors. Backend tests unchanged at 333 passing.
 
 ### 3.2 Rewrite useAudioCapture Hook
-- [ ] Rewrite `frontend/src/hooks/useAudioCapture.ts`:
+- [x] Rewrite `frontend/src/hooks/useAudioCapture.ts`:
   - Remove `getUserMedia`, `AudioContext`, `ScriptProcessor`, and WebSocket audio sending logic
   - Replace with REST API calls to `/api/recording/start`, `/api/recording/stop`, `/api/recording/status`
   - Expose: `start(options)`, `stop()`, `isRecording`, `status`, `devices`
   - Add `fetchDevices()` that calls `GET /api/audio/devices`
   - Add a polling interval (every 2s) for recording status while active
-- [ ] Verify `npm run build` compiles with no errors
+- [x] Verify `npm run build` compiles with no errors
+  > Rewrote `useAudioCapture.ts`: removed all getUserMedia/AudioContext/ScriptProcessor logic. New hook uses fetch() to call REST endpoints, polls status every 2 s while recording, exposes `start(options?)`, `stop()`, `isRecording`, `status`, `devices`, `fetchDevices`. Updated `App.tsx` to use new interface: removed audio WebSocket, removed `onAudioChunk` callback, renamed `isCapturing` → `isRecording`. Build compiles clean.
 
 ### 3.3 Device Picker Component
 - [ ] Create `frontend/src/components/DevicePicker.tsx`:
