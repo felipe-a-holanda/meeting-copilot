@@ -3,7 +3,7 @@
 
 ## Estado Atual
 - **Fase**: 3 — Frontend Updates
-- **Última tarefa**: 3.2 Rewrite useAudioCapture Hook
+- **Última tarefa**: 3.3 Device Picker Component
 - **Testes passando**: 333 (backend); frontend build clean
 
 ## Decisões Técnicas
