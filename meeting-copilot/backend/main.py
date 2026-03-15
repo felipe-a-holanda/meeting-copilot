@@ -44,6 +44,30 @@ audio_recorder = AudioRecorder(pipeline=audio_pipeline, recordings_dir=settings.
 @app.on_event("startup")
 async def _startup() -> None:
     await session_store.init_db()
+    await _cleanup_orphaned_ffmpeg()
+
+
+async def _cleanup_orphaned_ffmpeg() -> None:
+    """Kill any ffmpeg processes left over from a previous server run.
+
+    Uses ``pkill -f`` to match processes that include ``-f pulse`` in their
+    command line — the signature of our PulseAudio capture commands.
+    Safe to call even when no orphans exist (pkill exits with code 1 in that
+    case, which we silently ignore).
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "pkill", "-f", "ffmpeg.*-f pulse",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        returncode = await proc.wait()
+        if returncode == 0:
+            logger.info("Cleaned up orphaned ffmpeg PulseAudio capture processes on startup")
+    except FileNotFoundError:
+        logger.debug("pkill not available — skipping orphaned ffmpeg cleanup")
+    except Exception as exc:
+        logger.warning("Failed to clean up orphaned ffmpeg processes: %s", exc)
 
 dispatcher = LLMDispatcher(settings)
 
@@ -64,6 +88,24 @@ context_manager = ContextManager(
     dispatcher=dispatcher,
     broadcast_fn=_broadcast_to_clients,
 )
+
+
+async def _on_recorder_crash() -> None:
+    """Invoked by AudioRecorder when all ffmpeg streams exit unexpectedly.
+
+    Resets the active session pointer and broadcasts an error to all connected
+    control clients so the frontend can update its UI.
+    """
+    global _active_session_id
+    logger.error("ffmpeg crash detected — recording stopped unexpectedly")
+    _active_session_id = None
+    await _broadcast_error(
+        "Recording stopped unexpectedly — audio capture crashed",
+        context="recorder_crash",
+    )
+
+
+audio_recorder.set_crash_callback(_on_recorder_crash)
 
 
 async def _segment_handler(segment) -> None:

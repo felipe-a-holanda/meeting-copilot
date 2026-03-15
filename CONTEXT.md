@@ -3,10 +3,13 @@
 
 ## Estado Atual
 - **Fase**: 4 — Integration & Polish (in progress)
-- **Última tarefa**: 4.4 Settings Endpoint Updates
-- **Testes passando**: 359 (backend); frontend build clean
+- **Última tarefa**: 4.5 Error Handling & Edge Cases
+- **Testes passando**: 372 (backend); frontend build clean
 
 ## Decisões Técnicas
+- `_stopping: bool` flag on `AudioRecorder` distinguishes graceful `stop()` from unexpected crash. Set to `True` before sending SIGINT so reader-loop `finally` blocks skip crash detection. Also set in E2E test helper before waiting for reader tasks (mock EOF != crash).
+- `_active_stream_count: int` tracks running reader loops. When any stream crashes (unexpected EOF), count decrements; only when it hits 0 does `_handle_crash()` fire. This allows single-stream failure to continue with the surviving stream.
+- Startup calls `pkill -f "ffmpeg.*-f pulse"` to clean up orphaned processes from previous server runs. Silently ignored if pkill is unavailable or no processes matched.
 - `audio_capture_mode` added to `GET /settings` response; `App.tsx` fetches it on mount. Audio WS (`/ws/audio`) is only opened for `browser` or `both` modes — never opened in default `backend` mode.
 - `_active_session_id: str | None` module-level var in `main.py` tracks the session tied to the current recording. Cleared on `stop`.
 - `is_recording` is a property on `AudioRecorder` — tests must mock the whole `audio_recorder` object (not the property directly) using `patch("backend.main.audio_recorder", mock_recorder)`.

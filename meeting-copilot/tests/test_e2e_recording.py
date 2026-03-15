@@ -79,6 +79,8 @@ async def _init_db_and_reset_state():
     # Reset module-level recorder state so tests don't bleed into each other
     recorder = main_module.audio_recorder
     recorder._is_recording = False
+    recorder._stopping = False
+    recorder._active_stream_count = 0
     recorder._mic_process = None
     recorder._monitor_process = None
     for task in (recorder._mic_reader_task, recorder._monitor_reader_task):
@@ -108,10 +110,17 @@ def client():
 
 
 async def _wait_for_reader_tasks() -> None:
-    """Block until the module-level recorder's reader tasks finish (or 5 s timeout)."""
+    """Block until the module-level recorder's reader tasks finish (or 5 s timeout).
+
+    Sets _stopping=True before waiting so that reader-loop EOF detection treats the
+    EOF as a controlled end (all chunks delivered) rather than an unexpected crash.
+    In production, ffmpeg keeps running until SIGINT; in tests the mock emits all
+    data then EOF immediately.
+    """
     import backend.main as main_module
 
     recorder = main_module.audio_recorder
+    recorder._stopping = True  # suppress crash detection for expected test EOF
     if recorder._mic_reader_task:
         await asyncio.wait_for(recorder._mic_reader_task, timeout=5.0)
     if recorder._monitor_reader_task:

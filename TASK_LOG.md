@@ -250,11 +250,12 @@
   > Updated `SettingsUpdate` model in `main.py`: removed `enable_diarization`, added `audio_capture_mode`, `mic_volume`, `save_recordings`. `GET /settings` now returns all 5 fields (fixed stale `settings.whisper_model_size` → `settings.whisper_model` and `settings.use_claude_api_fallback` → `settings.use_api_fallback`). `POST /settings` handler processes all new fields. Rewrote `SettingsPanel.tsx`: removed diarization toggle, added Audio Capture Mode dropdown, Mic Volume slider, and Save Recordings toggle. Created `tests/test_settings_endpoint.py` with 10 tests. 359 total backend tests, 0 failures; frontend build clean.
 
 ### 4.5 Error Handling & Edge Cases
-- [ ] Handle ffmpeg crashing mid-recording: detect process exit, broadcast error to frontend, set recording state to idle
-- [ ] Handle PulseAudio device disappearing mid-recording (e.g., headphones unplugged): log warning, attempt to continue with remaining device
-- [ ] Handle concurrent start requests: return 409 Conflict
-- [ ] Handle server restart while recording: on startup, detect orphaned ffmpeg processes and clean up
-- [ ] Write tests for each error scenario
+- [x] Handle ffmpeg crashing mid-recording: detect process exit, broadcast error to frontend, set recording state to idle
+- [x] Handle PulseAudio device disappearing mid-recording (e.g., headphones unplugged): log warning, attempt to continue with remaining device
+- [x] Handle concurrent start requests: return 409 Conflict
+- [x] Handle server restart while recording: on startup, detect orphaned ffmpeg processes and clean up
+- [x] Write tests for each error scenario
+  > Added `_stopping` flag and `_active_stream_count` to `AudioRecorder`. `_reader_loop` now has a `finally` block that decrements the count on unexpected EOF; when count reaches 0, `_handle_crash()` is called (resets state, calls registered callback). Partial crash (one stream fails, other survives) just logs a warning. `stop()` sets `_stopping=True` first to suppress crash detection during graceful shutdown. In `main.py`: registered `_on_recorder_crash` callback (clears `_active_session_id`, broadcasts error). Added `_cleanup_orphaned_ffmpeg()` called on startup (pkill -f "ffmpeg.*-f pulse"). Created `tests/test_recorder_crash.py` with 13 tests. Updated E2E test helper to set `_stopping=True` before waiting for reader tasks (mock EOF != crash). 372 total tests, 0 failures.
 
 ### 4.6 Update Documentation
 - [ ] Update `README.md` with new system requirements (pactl, ffmpeg)

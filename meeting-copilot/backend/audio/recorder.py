@@ -86,6 +86,8 @@ class AudioRecorder:
         self._mic_reader_task: asyncio.Task | None = None
         self._monitor_reader_task: asyncio.Task | None = None
         self._is_recording: bool = False
+        self._stopping: bool = False          # True during graceful stop()
+        self._active_stream_count: int = 0   # running reader loops
         self._start_time: float | None = None
         self._chunks_processed: int = 0
         self._bytes_read: int = 0
@@ -95,6 +97,11 @@ class AudioRecorder:
         self._timestamp: str = ""
         self._audio_files: list[str] = []
         self._title: str = ""
+        self._crash_callback = None  # async callable, called when all streams crash
+
+    def set_crash_callback(self, callback) -> None:
+        """Register an async callback to be invoked when all ffmpeg streams exit unexpectedly."""
+        self._crash_callback = callback
 
     @staticmethod
     async def check_dependencies() -> DependencyStatus:
@@ -327,6 +334,7 @@ class AudioRecorder:
         self._mic_source = mic_source
         self._monitor_source = monitor_source
         self._is_recording = True
+        self._stopping = False
         self._start_time = time.monotonic()
         self._chunks_processed = 0
         self._bytes_read = 0
@@ -334,6 +342,11 @@ class AudioRecorder:
         self._timestamp = recording_timestamp
         self._audio_files = [p for p in [mic_file_path, monitor_file_path] if p is not None]
         self._title = title
+
+        # Track how many reader loops are active so we know when ALL streams have crashed
+        self._active_stream_count = 1  # mic always started
+        if self._monitor_process is not None:
+            self._active_stream_count = 2
 
         self._mic_reader_task = asyncio.create_task(
             self._reader_loop(self._mic_process, "Me")
@@ -350,6 +363,9 @@ class AudioRecorder:
         """
         if not self._is_recording:
             raise RuntimeError("Not currently recording")
+
+        # Signal reader loops that this is a graceful stop (not a crash)
+        self._stopping = True
 
         # Graceful shutdown for each process
         if self._mic_process is not None:
@@ -446,7 +462,15 @@ class AudioRecorder:
     async def _reader_loop(
         self, process: asyncio.subprocess.Process, speaker_label: str
     ) -> None:
-        """Read PCM chunks from ffmpeg stdout and forward them to the pipeline."""
+        """Read PCM chunks from ffmpeg stdout and forward them to the pipeline.
+
+        When EOF is received while *_is_recording* is True and *_stopping* is False,
+        the stream has crashed unexpectedly.  After decrementing *_active_stream_count*,
+        if all streams are gone :meth:`_handle_crash` is called to reset state and
+        notify the registered crash callback.  If one stream crashes but the other
+        remains alive (e.g., headphones unplugged mid-call), a warning is logged and
+        the surviving stream continues.
+        """
         assert process.stdout is not None
 
         try:
@@ -469,6 +493,41 @@ class AudioRecorder:
             raise
         except Exception as exc:
             logger.error("Reader loop (%s) unexpected error: %s", speaker_label, exc)
+        finally:
+            # Crash detection: if this EOF/error happened outside a graceful stop,
+            # decrement the active stream counter and trigger crash handling when
+            # all streams are gone.
+            if self._is_recording and not self._stopping:
+                self._active_stream_count -= 1
+                if self._active_stream_count > 0:
+                    logger.warning(
+                        "Stream '%s' exited unexpectedly — %d stream(s) still running",
+                        speaker_label,
+                        self._active_stream_count,
+                    )
+                else:
+                    logger.error(
+                        "All audio streams have exited unexpectedly — triggering crash handler"
+                    )
+                    await self._handle_crash()
+
+    async def _handle_crash(self) -> None:
+        """Reset recording state after an unrecoverable stream crash and notify caller."""
+        self._is_recording = False
+        self._mic_process = None
+        self._monitor_process = None
+        self._mic_reader_task = None
+        self._monitor_reader_task = None
+        self._start_time = None
+        self._meeting_dir = None
+        self._timestamp = ""
+        self._audio_files = []
+        self._title = ""
+        if self._crash_callback is not None:
+            try:
+                await self._crash_callback()
+            except Exception as exc:
+                logger.error("Crash callback raised an exception: %s", exc)
 
     # ------------------------------------------------------------------
     # Properties
