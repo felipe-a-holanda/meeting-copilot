@@ -2,9 +2,9 @@
 > Atualizado automaticamente pelo agente após cada iteração.
 
 ## Estado Atual
-- **Fase**: 2 — REST API Endpoints
-- **Última tarefa**: 2.4 Wire Segments to Session Storage
-- **Testes passando**: 333
+- **Fase**: 3 — Frontend Updates
+- **Última tarefa**: 3.1 New Types and API Client
+- **Testes passando**: 333 (backend); frontend build clean
 
 ## Decisões Técnicas
 - `_active_session_id: str | None` module-level var in `main.py` tracks the session tied to the current recording. Cleared on `stop`.

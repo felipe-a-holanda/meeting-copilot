@@ -158,14 +158,15 @@
 ## Phase 3 — Frontend Updates
 
 ### 3.1 New Types and API Client
-- [ ] Add new TypeScript interfaces to `frontend/src/types/messages.ts`:
+- [x] Add new TypeScript interfaces to `frontend/src/types/messages.ts`:
   - `AudioDevice { name: string; description: string }`
   - `DeviceListResponse { sources: AudioDevice[]; sinks: AudioDevice[]; defaults: { source: string; sink: string; monitor: string } }`
   - `RecordingStartRequest { title?: string; mic_source?: string; monitor_source?: string; mic_volume?: number; save_file?: boolean }`
   - `RecordingStartResponse { session_id: string; status: string; mic_source: string; monitor_source: string }`
   - `RecordingStopResponse { session_id: string; status: string; duration_seconds: number; segments_count: number; file_path?: string }`
   - `RecordingStatusResponse { is_recording: boolean; session_id?: string; duration_seconds: number; chunks_processed: number; segments_emitted: number }`
-- [ ] Verify `npm run build` compiles with no errors
+- [x] Verify `npm run build` compiles with no errors
+  > Added 6 new interfaces to `messages.ts` under a new "Audio Device / Recording API types" section. `npm run build` succeeds with no TypeScript errors. Backend tests unchanged at 333 passing.
 
 ### 3.2 Rewrite useAudioCapture Hook
 - [ ] Rewrite `frontend/src/hooks/useAudioCapture.ts`:

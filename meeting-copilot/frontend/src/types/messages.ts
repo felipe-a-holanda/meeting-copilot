@@ -82,6 +82,54 @@ export type ServerMessage =
 // Union type for all client → server messages
 export type ClientMessage = RequestReplySuggestion | CustomPromptRequest;
 
+// === Audio Device / Recording API types ===
+
+export interface AudioDevice {
+  name: string;
+  description: string;
+}
+
+export interface DeviceListResponse {
+  sources: AudioDevice[];
+  sinks: AudioDevice[];
+  defaults: {
+    source: string;
+    sink: string;
+    monitor: string;
+  };
+}
+
+export interface RecordingStartRequest {
+  title?: string;
+  mic_source?: string;
+  monitor_source?: string;
+  mic_volume?: number;
+  save_file?: boolean;
+}
+
+export interface RecordingStartResponse {
+  session_id: string;
+  status: string;
+  mic_source: string;
+  monitor_source: string;
+}
+
+export interface RecordingStopResponse {
+  session_id: string;
+  status: string;
+  duration_seconds: number;
+  segments_count: number;
+  file_path?: string;
+}
+
+export interface RecordingStatusResponse {
+  is_recording: boolean;
+  session_id?: string;
+  duration_seconds: number;
+  chunks_processed: number;
+  segments_emitted: number;
+}
+
 // === Session / Storage types ===
 
 export interface SessionListItem {
