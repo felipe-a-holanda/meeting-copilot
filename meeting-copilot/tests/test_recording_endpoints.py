@@ -252,6 +252,7 @@ class TestStopRecordingSuccess:
         try:
             with (
                 patch("backend.main.audio_recorder", mock_recorder),
+                patch("backend.main.session_store.save_state", AsyncMock()),
                 patch("backend.main.session_store.load_session", AsyncMock(return_value=session_data)),
             ):
                 async with client as c:
@@ -281,6 +282,7 @@ class TestStopRecordingSuccess:
         try:
             with (
                 patch("backend.main.audio_recorder", mock_recorder),
+                patch("backend.main.session_store.save_state", AsyncMock()),
                 patch("backend.main.session_store.load_session", AsyncMock(return_value=session_data)),
             ):
                 async with client as c:
@@ -306,6 +308,7 @@ class TestStopRecordingSuccess:
         try:
             with (
                 patch("backend.main.audio_recorder", mock_recorder),
+                patch("backend.main.session_store.save_state", AsyncMock()),
                 patch("backend.main.session_store.load_session", AsyncMock(return_value=session_data)),
             ):
                 async with client as c:
