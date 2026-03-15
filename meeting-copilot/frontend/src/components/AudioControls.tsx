@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DevicePicker } from './DevicePicker';
 import type {
   DeviceListResponse,
@@ -35,6 +35,10 @@ export function AudioControls({
   const [micSource, setMicSource] = useState('');
   const [monitorSource, setMonitorSource] = useState('');
   const [micVolume, setMicVolume] = useState(2.0);
+
+  useEffect(() => {
+    onFetchDevices();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const wsStatusColor = {
     connected: 'bg-green-500',
