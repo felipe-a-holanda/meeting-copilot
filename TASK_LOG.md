@@ -232,12 +232,13 @@
   > Added `check_dep` helper and a "System dependency checks" section at the top of `setup.sh`. Checks for `pactl` and `ffmpeg`; prints per-distro install commands for each missing tool (Ubuntu/Debian, Arch, Fedora). When all deps are present, runs `pactl list sources short` and displays source names. Also removed stale HF_TOKEN reference from the .env message. `bash -n` syntax check passes; dry-run confirms correct output on this machine. All 341 tests pass.
 
 ### 4.3 Debug Endpoint Updates
-- [ ] Update `GET /debug` to include recording state:
+- [x] Update `GET /debug` to include recording state:
   - `is_recording`, `active_session_id`, `recording_duration`
   - `audio_capture_mode` (backend/browser/both)
   - `mic_source`, `monitor_source` (when recording)
   - `ffmpeg_pid` (when recording)
-- [ ] Write tests: verify debug output includes recording info
+- [x] Write tests: verify debug output includes recording info
+  > Updated `debug_info()` in `main.py`: removed stale `enable_diarization` reference, added `audio_capture_mode` to settings section, added new `recording` section with `is_recording`, `active_session_id`, `recording_duration`, `mic_source`, `monitor_source`, and `ffmpeg_pids` (dict with `mic` and `monitor` PIDs). Created `tests/test_debug_endpoint.py` with 8 tests covering idle state, recording state, dual-process PIDs, mic-only PIDs, duration, and connections section. 349 tests total, 0 failures.
 
 ### 4.4 Settings Endpoint Updates
 - [ ] Update `GET /settings` and `POST /settings` to include new audio capture fields:

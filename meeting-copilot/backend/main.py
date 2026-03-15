@@ -293,14 +293,31 @@ async def recording_status() -> dict:
 @app.get("/debug")
 async def debug_info() -> dict:
     """Live pipeline diagnostics — useful for debugging recording/transcription issues."""
+    # Build recording state section
+    rec_stats = audio_recorder.recording_stats
+    ffmpeg_pids: dict[str, int | None] = {}
+    if audio_recorder.is_recording:
+        ffmpeg_pids["mic"] = audio_recorder._mic_process.pid if audio_recorder._mic_process else None
+        ffmpeg_pids["monitor"] = audio_recorder._monitor_process.pid if audio_recorder._monitor_process else None
+
     return {
         "pipeline": audio_pipeline.stats.to_dict(audio_pipeline),
         "settings": {
             "whisper_model": settings.whisper_model,
             "language": settings.language,
-            "enable_diarization": settings.enable_diarization,
+            "audio_capture_mode": _runtime_settings.get(
+                "audio_capture_mode", settings.audio_capture_mode
+            ),
             "ollama_url": settings.ollama_url,
             "ollama_model": settings.ollama_model,
+        },
+        "recording": {
+            "is_recording": audio_recorder.is_recording,
+            "active_session_id": _active_session_id,
+            "recording_duration": rec_stats.duration_seconds,
+            "mic_source": audio_recorder._mic_source if audio_recorder.is_recording else None,
+            "monitor_source": audio_recorder._monitor_source if audio_recorder.is_recording else None,
+            "ffmpeg_pids": ffmpeg_pids if audio_recorder.is_recording else {},
         },
         "connections": {
             "audio": len(audio_manager.active_connections),
