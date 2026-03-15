@@ -44,6 +44,30 @@ next_task() {
     grep -m1 '\- \[ \]' TASK_LOG.md 2>/dev/null | sed 's/.*\[ \] //' | cut -c1-80 || echo "(unknown)"
 }
 
+# ── CONTEXT.md initialization ─────────────────────────────────────────────────
+
+if [ ! -f "CONTEXT.md" ]; then
+    cat > CONTEXT.md << 'EOF'
+# Build Context — Meeting Copilot
+> Atualizado automaticamente pelo agente após cada iteração.
+
+## Estado Atual
+- **Fase**: 1 — Início
+- **Última tarefa**: (nenhuma ainda)
+- **Testes passando**: 0
+
+## Decisões Técnicas
+(nenhuma ainda)
+
+## Problemas Conhecidos / Armadilhas
+(nenhum ainda)
+
+## Arquivos Críticos
+(a ser preenchido pelo agente)
+EOF
+    echo "📝 CONTEXT.md criado (primeira execução)"
+fi
+
 # ── main loop ─────────────────────────────────────────────────────────────────
 
 echo "🚀 Starting autonomous build loop"
@@ -77,19 +101,34 @@ while [ $ITERATION -lt $MAX_ITERATIONS ]; do
     echo "  🤖 Launching Claude (timeout: ${TIMEOUT}s)..."
     echo ""
 
+    # Inject CONTEXT.md if it exists and has been populated
+    CONTEXT_INJECT=""
+    if [ -f "CONTEXT.md" ]; then
+        CONTEXT_INJECT="Before starting, read CONTEXT.md for decisions and state from previous iterations. "
+    fi
+
     start_heartbeat
     ITER_START=$SECONDS
 
-    # script(1) allocates a PTY so Claude streams output, writes directly to
-    # LOG_FILE (no pipe buffering), and -f flushes after each write.
-    # The child exit code is preserved via -e.
+    # Run claude with stream-json to capture token usage, while still streaming
+    # human-readable text to the log file.
+    JSON_LOG="${LOG_FILE%.txt}_tokens.jsonl"
     set +e
-    script -q -e -f "$LOG_FILE" -c "timeout $TIMEOUT claude \
+    timeout $TIMEOUT claude \
         --dangerously-skip-permissions \
         --max-turns 50 \
-        -p 'Read TASK_LOG.md. Find the FIRST task marked [ ]. Implement it fully — write all code, create all files, run tests. When done, mark it [x] in TASK_LOG.md with a brief note. Then git add and commit. If a task is impossible or blocked, mark it [!] with explanation and move to the next [ ] task. Work on ONE task per invocation.'"
-    EXIT_CODE=$?
+        --output-format stream-json \
+        -p "${CONTEXT_INJECT}Read TASK_LOG.md. Find the FIRST task marked [ ]. Implement it fully — write all code, create all files, run tests. When done, mark it [x] in TASK_LOG.md with a brief note. Then update CONTEXT.md with: current phase, last completed task, test count, any new technical decisions or gotchas. Then git add and commit (include CONTEXT.md in the commit). If a task is impossible or blocked, mark it [!] with explanation and move to the next [ ] task. Work on ONE task per invocation." \
+        2>&1 | tee "$JSON_LOG" | \
+        jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text' 2>/dev/null | \
+        tee -a "$LOG_FILE"
+    EXIT_CODE=${PIPESTATUS[0]}
     set -e
+
+    # Extract and display token usage from the result event
+    USAGE=$(grep '"type":"result"' "$JSON_LOG" 2>/dev/null | tail -1 | \
+        jq -r '"tokens_in=\(.usage.input_tokens) tokens_out=\(.usage.output_tokens)"' 2>/dev/null || true)
+    [ -n "$USAGE" ] && echo "  🔢 $USAGE"
 
     stop_heartbeat
 

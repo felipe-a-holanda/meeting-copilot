@@ -16,6 +16,8 @@ You are an autonomous coding agent building the **meeting-copilot** project from
    - Commit with message: `✅ Task X.Y: <description>`
 6. **If a task fails or is blocked**, mark it `[!]` with a note explaining why, then move to the next task
 7. **If all tasks are `[x]` or `[!]`**, output `🏁 ALL TASKS COMPLETE` and stop
+8. **Read `CONTEXT.md` at the start** — it has decisions and state from previous iterations
+9. **Update `CONTEXT.md` at the end** — update: current phase, last task completed, test count, any new technical decisions or gotchas discovered. Keep it under 50 lines. Include in the git commit.
 
 ## Project Context
 
