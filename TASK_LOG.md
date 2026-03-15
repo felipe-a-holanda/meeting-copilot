@@ -189,7 +189,7 @@
   > Created `DevicePicker` component with mic source dropdown (all PulseAudio sources), system audio dropdown (`.monitor` sources only), mic volume range slider (0.5–5.0x, default 2.0), and a "Refresh" button. Auto-selects defaults from `DeviceListResponse.defaults` on mount via `useEffect`. All props typed against existing `AudioDevice`/`DeviceListResponse` interfaces. `npm run build` compiles with no errors.
 
 ### 3.4 Update AudioControls Component
-- [ ] Modify `frontend/src/components/AudioControls.tsx`:
+- [x] Modify `frontend/src/components/AudioControls.tsx`:
   - Replace browser audio capture UI with backend recording controls
   - Integrate DevicePicker component
   - Add "Meeting title" text input
@@ -198,7 +198,8 @@
   - Show recording duration (from status polling)
   - Show recording indicator (pulsing red dot when recording)
   - Handle errors: show toast when pactl/ffmpeg unavailable, when already recording, etc.
-- [ ] Verify `npm run build` compiles with no errors
+- [x] Verify `npm run build` compiles with no errors
+  > Rewrote `AudioControls.tsx`: new props `isRecording`, `status`, `devices`, `onStart(opts)`, `onStop`, `onFetchDevices`. Local state manages `title`, `micSource`, `monitorSource`, `micVolume`. Integrates `DevicePicker`. Shows duration (MM:SS from `status.duration_seconds`), pulsing red dot when recording, chunk/segment counts. `handleStart` bundles local state into `RecordingStartRequest`. Updated `App.tsx` to extract `status`, `devices`, `fetchDevices` from `useAudioCapture` and pass to `AudioControls`. `npm run build` compiles with no errors.
 
 ### 3.5 Remove Audio WebSocket from App.tsx
 - [ ] In `App.tsx`, conditionally connect the audio WebSocket based on capture mode:

@@ -99,15 +99,23 @@ function App() {
     };
   }, [startControl, disconnectControl]);
 
-  const { isRecording, error, start: startCapture, stop: stopCapture } = useAudioCapture();
+  const {
+    isRecording,
+    status: recordingStatus,
+    devices,
+    error,
+    start: startCapture,
+    stop: stopCapture,
+    fetchDevices,
+  } = useAudioCapture();
 
   useEffect(() => {
     if (error) addToast(error, 'error');
   }, [error, addToast]);
 
-  const handleStart = useCallback(async () => {
+  const handleStart = useCallback(async (options?: import('./types/messages').RecordingStartRequest) => {
     startControl();
-    await startCapture();
+    await startCapture(options);
   }, [startControl, startCapture]);
 
   const handleStop = useCallback(async () => {
@@ -246,11 +254,13 @@ function App() {
       {/* Main content */}
       <main className="max-w-7xl mx-auto p-3 sm:p-6 flex flex-col gap-4 sm:gap-6">
         <AudioControls
-          isCapturing={isRecording}
+          isRecording={isRecording}
           wsStatus={controlWs.status}
-          error={error}
+          status={recordingStatus}
+          devices={devices}
           onStart={handleStart}
           onStop={handleStop}
+          onFetchDevices={fetchDevices}
         />
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">

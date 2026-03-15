@@ -3,7 +3,7 @@
 
 ## Estado Atual
 - **Fase**: 3 — Frontend Updates
-- **Última tarefa**: 3.3 Device Picker Component
+- **Última tarefa**: 3.4 Update AudioControls Component
 - **Testes passando**: 333 (backend); frontend build clean
 
 ## Decisões Técnicas
