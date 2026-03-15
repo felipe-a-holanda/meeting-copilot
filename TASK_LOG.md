@@ -214,14 +214,15 @@
 ## Phase 4 — Integration & Polish
 
 ### 4.1 End-to-End Integration Test
-- [ ] Create `tests/test_e2e_recording.py`:
+- [x] Create `tests/test_e2e_recording.py`:
   - Mock ffmpeg subprocess to produce known PCM audio data
   - Start recording via REST API
   - Verify chunks flow through pipeline
   - Verify transcript segments are emitted and stored in session
   - Stop recording via REST API
   - Verify session has segments and status is correct
-- [ ] Run all existing tests to ensure nothing is broken (`pytest`)
+- [x] Run all existing tests to ensure nothing is broken (`pytest`)
+  > Created `tests/test_e2e_recording.py` with 8 E2E tests covering: chunk forwarding with correct speaker labels ("Me"/"Them"), segment persistence in real SQLite, stop response segment count, dual-stream speaker label verification, lifecycle/state clearing after stop, session title propagation, duplicate-start 409 rejection. Mocks used: `asyncio.create_subprocess_exec` (fake PCM stdout), `AudioRecorder.check_dependencies`, `audio_pipeline._vad.is_speech`, `audio_pipeline._transcriber.transcribe`, `context_manager.on_new_segment`. Autouse fixture resets recorder+pipeline state between tests. All 341 tests pass (333 prior + 8 new).
 
 ### 4.2 Update Setup Script
 - [ ] Update `scripts/setup.sh` to check for `pactl` and `ffmpeg` at the start
