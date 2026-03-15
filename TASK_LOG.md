@@ -202,11 +202,12 @@
   > Rewrote `AudioControls.tsx`: new props `isRecording`, `status`, `devices`, `onStart(opts)`, `onStop`, `onFetchDevices`. Local state manages `title`, `micSource`, `monitorSource`, `micVolume`. Integrates `DevicePicker`. Shows duration (MM:SS from `status.duration_seconds`), pulsing red dot when recording, chunk/segment counts. `handleStart` bundles local state into `RecordingStartRequest`. Updated `App.tsx` to extract `status`, `devices`, `fetchDevices` from `useAudioCapture` and pass to `AudioControls`. `npm run build` compiles with no errors.
 
 ### 3.5 Remove Audio WebSocket from App.tsx
-- [ ] In `App.tsx`, conditionally connect the audio WebSocket based on capture mode:
+- [x] In `App.tsx`, conditionally connect the audio WebSocket based on capture mode:
   - If backend mode: do not open `/ws/audio`, only open `/ws/control` for receiving transcripts and insights
   - If browser mode (legacy): keep current behavior
   - Read mode from a config or from `GET /settings` response
-- [ ] Verify `npm run build` compiles with no errors
+- [x] Verify `npm run build` compiles with no errors
+  > Added `audio_capture_mode` to `GET /settings` in `main.py`. In `App.tsx`: fetch settings on mount → set `captureMode` state (`'backend' | 'browser' | 'both'`). Added `audioWs` via `useWebSocket` — only `startAudioWs()` is called when mode is `'browser'` or `'both'`; in backend mode (default) the audio WS is never opened. `DebugPanel` shows `audioWsStatus` as `'disconnected'` for backend mode. `npm run build` clean; 333 backend tests pass.
 
 ---
 

@@ -2,11 +2,12 @@
 > Atualizado automaticamente pelo agente após cada iteração.
 
 ## Estado Atual
-- **Fase**: 3 — Frontend Updates
-- **Última tarefa**: 3.4 Update AudioControls Component
+- **Fase**: 3 — Frontend Updates (COMPLETE) → Phase 4 next
+- **Última tarefa**: 3.5 Remove Audio WebSocket from App.tsx
 - **Testes passando**: 333 (backend); frontend build clean
 
 ## Decisões Técnicas
+- `audio_capture_mode` added to `GET /settings` response; `App.tsx` fetches it on mount. Audio WS (`/ws/audio`) is only opened for `browser` or `both` modes — never opened in default `backend` mode.
 - `_active_session_id: str | None` module-level var in `main.py` tracks the session tied to the current recording. Cleared on `stop`.
 - `is_recording` is a property on `AudioRecorder` — tests must mock the whole `audio_recorder` object (not the property directly) using `patch("backend.main.audio_recorder", mock_recorder)`.
 - `segments_emitted` / `segments_count` are read from `session_store.load_session()` at stop/status time (not tracked in a counter), keeping state in one place.

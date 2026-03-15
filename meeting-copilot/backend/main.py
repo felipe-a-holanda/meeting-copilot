@@ -106,8 +106,8 @@ _runtime_settings: dict = {}
 @app.get("/settings")
 async def get_settings() -> dict:
     return {
-        "enable_diarization": _runtime_settings.get(
-            "enable_diarization", settings.enable_diarization
+        "audio_capture_mode": _runtime_settings.get(
+            "audio_capture_mode", settings.audio_capture_mode
         ),
         "whisper_model_size": _runtime_settings.get(
             "whisper_model_size", settings.whisper_model_size

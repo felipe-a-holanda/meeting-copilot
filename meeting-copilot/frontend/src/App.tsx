@@ -14,6 +14,9 @@ import { useMeetingState } from './hooks/useMeetingState';
 import { SessionData } from './types/messages';
 
 const CONTROL_WS_URL = process.env.REACT_APP_CONTROL_WS_URL || 'ws://localhost:8000/ws/control';
+const AUDIO_WS_URL = process.env.REACT_APP_AUDIO_WS_URL || 'ws://localhost:8000/ws/audio';
+
+type CaptureMode = 'backend' | 'browser' | 'both';
 
 function ConnectionDot({ status }: { status: 'connecting' | 'connected' | 'disconnected' }) {
   const color =
@@ -32,6 +35,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showSessions, setShowSessions] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [captureMode, setCaptureMode] = useState<CaptureMode>('backend');
 
   // Debug stats
   const debugStatsRef = useRef({
@@ -51,6 +55,18 @@ function App() {
 
   const dismissToast = useCallback((id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  // Fetch capture mode from settings on mount
+  useEffect(() => {
+    fetch('/settings')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.audio_capture_mode) {
+          setCaptureMode(data.audio_capture_mode as CaptureMode);
+        }
+      })
+      .catch(() => {/* use default 'backend' */});
   }, []);
 
   // Apply / remove `dark` class on the root element
@@ -98,6 +114,22 @@ function App() {
       disconnectControl();
     };
   }, [startControl, disconnectControl]);
+
+  // Audio WebSocket — only used in browser capture mode.
+  // In backend mode (default), audio is captured server-side via ffmpeg/PulseAudio
+  // and this WebSocket is never opened.
+  const audioWs = useWebSocket(AUDIO_WS_URL, {});
+  const {
+    start: startAudioWs,
+    disconnect: disconnectAudioWs,
+  } = audioWs;
+
+  useEffect(() => {
+    if (captureMode === 'browser' || captureMode === 'both') {
+      startAudioWs();
+      return () => disconnectAudioWs();
+    }
+  }, [captureMode, startAudioWs, disconnectAudioWs]);
 
   const {
     isRecording,
@@ -148,7 +180,7 @@ function App() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-200">
       <ErrorToast toasts={toasts} onDismiss={dismissToast} />
       <DebugPanel
-        audioWsStatus={controlWs.status}
+        audioWsStatus={captureMode === 'backend' ? 'disconnected' : audioWs.status}
         controlWsStatus={controlWs.status}
         stats={debugStats}
       />
