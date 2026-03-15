@@ -129,22 +129,23 @@
   > Added `GET /api/audio/devices` to `main.py`. Instantiated `audio_recorder = AudioRecorder(pipeline=audio_pipeline, recordings_dir=settings.recordings_dir)` at module level. Endpoint checks `check_dependencies()` for 503 when pactl is missing, and catches `RuntimeError` from `list_devices()` for 503. Created `tests/test_devices_endpoint.py` with 9 tests (success path: 200 + response shape, empty list; error paths: pactl missing, list_devices raises). All 9 tests pass.
 
 ### 2.3 Recording Control Endpoints
-- [ ] Instantiate `AudioRecorder` in `main.py` (wired to the existing `audio_pipeline`)
-- [ ] Add `POST /api/recording/start` endpoint:
+- [x] Instantiate `AudioRecorder` in `main.py` (wired to the existing `audio_pipeline`)
+- [x] Add `POST /api/recording/start` endpoint:
   - Accepts optional body: `title`, `mic_source`, `monitor_source`, `mic_volume`, `save_file`
   - Creates a new session via `session_store.create_session()`
   - Calls `recorder.start()` with the provided or default parameters
   - Returns session_id, status, and active device names
   - Returns 409 if already recording
   - Returns 503 if dependencies (pactl/ffmpeg) are missing
-- [ ] Add `POST /api/recording/stop` endpoint:
+- [x] Add `POST /api/recording/stop` endpoint:
   - Calls `recorder.stop()`
   - Returns session_id, duration, segments count, file path
   - Returns 409 if not currently recording
-- [ ] Add `GET /api/recording/status` endpoint:
+- [x] Add `GET /api/recording/status` endpoint:
   - Returns is_recording, session_id, duration, chunks/segments counts
   - Returns status "idle" when not recording
-- [ ] Write tests: `tests/test_recording_endpoints.py` — test start/stop/status lifecycle with mocked AudioRecorder. Test error cases: start while already recording, stop when not recording, missing dependencies.
+- [x] Write tests: `tests/test_recording_endpoints.py` — test start/stop/status lifecycle with mocked AudioRecorder. Test error cases: start while already recording, stop when not recording, missing dependencies.
+  > Added `RecordingStartRequest` Pydantic model and `_active_session_id` module-level var to `main.py`. Implemented all 3 endpoints. `start` creates a session then launches recorder; `stop` retrieves segment count from session store. Status endpoint returns "idle" shape or "recording" shape with live stats. 14 new tests all pass; 326 total, 0 failures.
 
 ### 2.4 Wire Segments to Session Storage
 - [ ] When recording starts, wire `context_manager.on_new_segment` to also call `session_store.save_segment()` for the active session

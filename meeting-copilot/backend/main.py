@@ -79,6 +79,18 @@ class SettingsUpdate(BaseModel):
     use_claude_api_fallback: bool | None = None
 
 
+class RecordingStartRequest(BaseModel):
+    title: str = ""
+    mic_source: str | None = None
+    monitor_source: str | None = None
+    mic_volume: float = 2.0
+    save_file: bool | None = None  # None = use settings default
+
+
+# Active recording session tracking (module-level, single recorder instance)
+_active_session_id: str | None = None
+
+
 # Runtime-overridable settings (supplement the env-based Settings)
 _runtime_settings: dict = {}
 
@@ -148,6 +160,117 @@ async def get_audio_devices() -> dict:
             "sink": device_list.defaults.sink,
             "monitor": device_list.defaults.monitor,
         },
+    }
+
+
+@app.post("/api/recording/start", status_code=200)
+async def start_recording(body: RecordingStartRequest) -> dict:
+    """Start backend audio capture and create a new session.
+
+    Returns 409 if already recording.
+    Returns 503 if pactl/ffmpeg are not available.
+    """
+    global _active_session_id
+
+    if audio_recorder.is_recording:
+        raise HTTPException(status_code=409, detail="Recording is already in progress")
+
+    dep_status = await AudioRecorder.check_dependencies()
+    if not dep_status.all_available:
+        missing = ", ".join(dep_status.errors)
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "dependencies_missing", "message": missing},
+        )
+
+    # Create a new session before starting recorder
+    session_info = await session_store.create_session(title=body.title)
+
+    save_file = body.save_file if body.save_file is not None else settings.save_recordings
+    try:
+        await audio_recorder.start(
+            mic_source=body.mic_source,
+            monitor_source=body.monitor_source,
+            mic_volume=body.mic_volume,
+            save_to_file=save_file,
+            title=body.title or session_info.title,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail={"error": "recorder_start_failed", "message": str(exc)})
+
+    _active_session_id = session_info.id
+
+    return {
+        "session_id": session_info.id,
+        "status": "recording",
+        "mic_source": audio_recorder._mic_source,
+        "monitor_source": audio_recorder._monitor_source,
+    }
+
+
+@app.post("/api/recording/stop", status_code=200)
+async def stop_recording() -> dict:
+    """Stop the active backend audio capture.
+
+    Returns 409 if not currently recording.
+    """
+    global _active_session_id
+
+    if not audio_recorder.is_recording:
+        raise HTTPException(status_code=409, detail="Not currently recording")
+
+    session_id = _active_session_id
+    stats = await audio_recorder.stop()
+    _active_session_id = None
+
+    # Count persisted segments for the session
+    segments_count = 0
+    if session_id:
+        session_data = await session_store.load_session(session_id)
+        if session_data is not None:
+            segments_count = len(session_data.segments)
+
+    return {
+        "session_id": session_id,
+        "status": "stopped",
+        "duration_seconds": stats.duration_seconds,
+        "segments_count": segments_count,
+        "file_path": stats.file_path,
+    }
+
+
+@app.get("/api/recording/status")
+async def recording_status() -> dict:
+    """Return current recording state.
+
+    Returns status "idle" when not recording, "recording" when active.
+    """
+    if not audio_recorder.is_recording:
+        return {
+            "is_recording": False,
+            "session_id": None,
+            "status": "idle",
+            "duration_seconds": 0.0,
+            "chunks_processed": 0,
+            "segments_emitted": 0,
+        }
+
+    stats = audio_recorder.recording_stats
+
+    # Count persisted segments for the active session
+    segments_emitted = 0
+    if _active_session_id:
+        session_data = await session_store.load_session(_active_session_id)
+        if session_data is not None:
+            segments_emitted = len(session_data.segments)
+
+    return {
+        "is_recording": True,
+        "session_id": _active_session_id,
+        "status": "recording",
+        "duration_seconds": stats.duration_seconds,
+        "chunks_processed": stats.chunks_processed,
+        "segments_emitted": segments_emitted,
     }
 
 
