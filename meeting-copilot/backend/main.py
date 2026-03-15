@@ -65,8 +65,16 @@ context_manager = ContextManager(
     broadcast_fn=_broadcast_to_clients,
 )
 
-# Wire audio pipeline → context manager
-audio_pipeline.on_segment(context_manager.on_new_segment)
+
+async def _segment_handler(segment) -> None:
+    """Forward segment to context manager and persist to the active session."""
+    await context_manager.on_new_segment(segment)
+    if _active_session_id:
+        await session_store.save_segment(_active_session_id, segment)
+
+
+# Wire audio pipeline → context manager + session persistence
+audio_pipeline.on_segment(_segment_handler)
 
 
 class CreateSessionRequest(BaseModel):
@@ -222,6 +230,14 @@ async def stop_recording() -> dict:
     session_id = _active_session_id
     stats = await audio_recorder.stop()
     _active_session_id = None
+
+    # Persist final summary and action items for the session
+    if session_id:
+        await session_store.save_state(
+            session_id,
+            context_manager.state.current_summary,
+            context_manager.state.action_items,
+        )
 
     # Count persisted segments for the session
     segments_count = 0

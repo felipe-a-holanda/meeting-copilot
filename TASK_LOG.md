@@ -148,9 +148,10 @@
   > Added `RecordingStartRequest` Pydantic model and `_active_session_id` module-level var to `main.py`. Implemented all 3 endpoints. `start` creates a session then launches recorder; `stop` retrieves segment count from session store. Status endpoint returns "idle" shape or "recording" shape with live stats. 14 new tests all pass; 326 total, 0 failures.
 
 ### 2.4 Wire Segments to Session Storage
-- [ ] When recording starts, wire `context_manager.on_new_segment` to also call `session_store.save_segment()` for the active session
-- [ ] When recording stops, save final meeting state (summary, action items) to session
-- [ ] Write tests: verify segments are persisted during a recording session
+- [x] When recording starts, wire `context_manager.on_new_segment` to also call `session_store.save_segment()` for the active session
+- [x] When recording stops, save final meeting state (summary, action items) to session
+- [x] Write tests: verify segments are persisted during a recording session
+  > Introduced `_segment_handler` in `main.py` — a wrapper that calls `context_manager.on_new_segment` AND `session_store.save_segment(_active_session_id, seg)` when a session is active. Registered this as the `audio_pipeline` segment callback. In `stop_recording()`, added `session_store.save_state(session_id, summary, action_items)` before loading final count. Created `tests/test_segment_persistence.py` with 7 tests (segment saved when active, not saved when idle, correct segment forwarded, save_state called on stop, save_state skipped when no session, segment count in stop response). 333 tests total, 0 failures.
 
 ---
 

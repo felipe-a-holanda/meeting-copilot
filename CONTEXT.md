@@ -3,14 +3,15 @@
 
 ## Estado Atual
 - **Fase**: 2 — REST API Endpoints
-- **Última tarefa**: 2.3 Recording Control Endpoints
-- **Testes passando**: 326
+- **Última tarefa**: 2.4 Wire Segments to Session Storage
+- **Testes passando**: 333
 
 ## Decisões Técnicas
 - `_active_session_id: str | None` module-level var in `main.py` tracks the session tied to the current recording. Cleared on `stop`.
 - `is_recording` is a property on `AudioRecorder` — tests must mock the whole `audio_recorder` object (not the property directly) using `patch("backend.main.audio_recorder", mock_recorder)`.
 - `segments_emitted` / `segments_count` are read from `session_store.load_session()` at stop/status time (not tracked in a counter), keeping state in one place.
 - `RecordingStartRequest.save_file` defaults to `None` meaning "use `settings.save_recordings`".
+- `_segment_handler` in `main.py` wraps `context_manager.on_new_segment` + `session_store.save_segment` — registered as the single `audio_pipeline.on_segment` callback. Avoids multi-callback complexity in pipeline.
 
 ## Problemas Conhecidos / Armadilhas
 - `main.py` still references `settings.enable_diarization` and `audio_pipeline.set_diarization_enabled()` in `get_settings`/`update_settings` — these were removed in Phase 1B but `main.py` wasn't updated. Pre-existing issue; not blocking current tasks.
