@@ -93,9 +93,9 @@ async def _init_db_and_reset_state():
     recorder._bytes_read = 0
     main_module._active_session_id = None
 
-    # Reset pipeline rolling buffer
-    main_module.audio_pipeline._buffer = np.array([], dtype=np.int16)
-    main_module.audio_pipeline._buffer_start_time = 0.0
+    # Reset pipeline rolling buffers
+    main_module.audio_pipeline._buffers = {}
+    main_module.audio_pipeline._buffer_start_times = {}
     main_module.audio_pipeline._meeting_start = None
 
 

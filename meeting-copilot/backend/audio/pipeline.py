@@ -79,9 +79,10 @@ class AudioPipeline:
         self._callback: SegmentCallback | None = None
         self.stats = AudioPipelineStats()
 
-        # Rolling audio buffer — accumulates bytes until there is enough to transcribe
-        self._buffer: np.ndarray = np.array([], dtype=_DTYPE)
-        self._buffer_start_time: float = 0.0  # seconds from meeting start
+        # Per-speaker rolling audio buffers — one entry per speaker_label so that
+        # concurrent mic and monitor streams do not cross-contaminate each other.
+        self._buffers: dict[str, np.ndarray] = {}
+        self._buffer_start_times: dict[str, float] = {}
         self._meeting_start: float | None = None
 
     # ------------------------------------------------------------------
@@ -107,19 +108,26 @@ class AudioPipeline:
 
         # Parse bytes → int16 numpy array
         audio_int16 = np.frombuffer(chunk, dtype=_DTYPE)
-        self._buffer = np.concatenate([self._buffer, audio_int16])
+
+        # Use a per-speaker buffer so concurrent mic/monitor streams don't mix
+        if speaker_label not in self._buffers:
+            self._buffers[speaker_label] = np.array([], dtype=_DTYPE)
+            self._buffer_start_times[speaker_label] = 0.0
+        self._buffers[speaker_label] = np.concatenate([self._buffers[speaker_label], audio_int16])
 
         # Only process once we have a meaningful amount of audio
-        if len(self._buffer) < _MIN_CHUNK_SAMPLES:
+        if len(self._buffers[speaker_label]) < _MIN_CHUNK_SAMPLES:
             return
 
         await self._process_buffer(speaker_label=speaker_label)
 
     async def reset(self, speaker_label: str = "Speaker") -> None:
-        """Flush the buffer and reset pipeline state (e.g. at meeting end)."""
-        if len(self._buffer) > 0:
-            await self._process_buffer(force=True, speaker_label=speaker_label)
-        self._buffer = np.array([], dtype=_DTYPE)
+        """Flush all per-speaker buffers and reset pipeline state (e.g. at meeting end)."""
+        for label, buf in list(self._buffers.items()):
+            if len(buf) > 0:
+                await self._process_buffer(force=True, speaker_label=label)
+        self._buffers = {}
+        self._buffer_start_times = {}
         self._meeting_start = None
 
     # ------------------------------------------------------------------
@@ -132,9 +140,10 @@ class AudioPipeline:
         return time.monotonic() - self._meeting_start
 
     async def _process_buffer(self, force: bool = False, speaker_label: str = "Speaker") -> None:
-        """Run VAD + transcription on the accumulated buffer."""
-        audio_int16 = self._buffer.copy()
-        self._buffer = np.array([], dtype=_DTYPE)
+        """Run VAD + transcription on the accumulated buffer for *speaker_label*."""
+        buf = self._buffers.get(speaker_label, np.array([], dtype=_DTYPE))
+        audio_int16 = buf.copy()
+        self._buffers[speaker_label] = np.array([], dtype=_DTYPE)
 
         # Convert to float32 for both VAD and Whisper
         audio_f32 = audio_int16.astype(np.float32) / 32768.0
@@ -154,10 +163,10 @@ class AudioPipeline:
                 self.stats.vad_unavailable += 1
                 logger.debug("VAD unavailable, skipping VAD gate.")
 
-        # Compute timestamp for the start of this chunk
+        # Compute timestamp for the start of this chunk (per-speaker clock)
         chunk_duration = len(audio_int16) / _SAMPLE_RATE
-        chunk_start = self._buffer_start_time
-        self._buffer_start_time += chunk_duration
+        chunk_start = self._buffer_start_times.get(speaker_label, 0.0)
+        self._buffer_start_times[speaker_label] = chunk_start + chunk_duration
 
         # Transcribe
         self.stats.transcription_attempts += 1

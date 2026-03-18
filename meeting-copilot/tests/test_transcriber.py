@@ -431,7 +431,147 @@ class TestAudioPipeline:
 
         await pipeline.reset()
         assert pipeline._meeting_start is None
-        assert len(pipeline._buffer) == 0
+        assert pipeline._buffers == {}
+
+    @pytest.mark.asyncio
+    async def test_separate_speaker_buffers_no_cross_contamination(self):
+        """Mic and monitor chunks accumulate in independent buffers."""
+        from backend.audio.pipeline import AudioPipeline, _MIN_CHUNK_SAMPLES
+
+        config = self._make_config()
+        pipeline = AudioPipeline(config)
+
+        # Do not trigger transcription — just check buffer isolation
+        pipeline._vad.is_speech = MagicMock(return_value=False)
+
+        half = _MIN_CHUNK_SAMPLES // 2
+        mic_chunk = np.zeros(half, dtype=np.int16)
+        monitor_chunk = np.zeros(half, dtype=np.int16) + 1
+
+        await pipeline.process_audio_chunk(mic_chunk.tobytes(), speaker_label="Me")
+        await pipeline.process_audio_chunk(monitor_chunk.tobytes(), speaker_label="Them")
+
+        # Each speaker has its own buffer — neither has been flushed yet
+        assert "Me" in pipeline._buffers
+        assert "Them" in pipeline._buffers
+        assert len(pipeline._buffers["Me"]) == half
+        assert len(pipeline._buffers["Them"]) == half
+
+    @pytest.mark.asyncio
+    async def test_speaker_label_assigned_to_correct_stream(self):
+        """Segments produced from mic chunks are labeled 'Me'; monitor chunks 'Them'."""
+        from backend.audio.pipeline import AudioPipeline
+        from backend.audio.transcriber import TranscriptionResult
+
+        config = self._make_config()
+        pipeline = AudioPipeline(config)
+        pipeline._vad.is_speech = MagicMock(return_value=True)
+        pipeline._transcriber.transcribe = MagicMock(return_value=[
+            TranscriptionResult(text="hello", start=0.0, end=1.0, language="pt")
+        ])
+
+        received = []
+
+        async def callback(seg):
+            received.append(seg)
+
+        pipeline.on_segment(callback)
+
+        mic_pcm = make_pcm_bytes(duration_seconds=2.0)
+        monitor_pcm = make_pcm_bytes(duration_seconds=2.0)
+
+        await pipeline.process_audio_chunk(mic_pcm, speaker_label="Me")
+        await pipeline.process_audio_chunk(monitor_pcm, speaker_label="Them")
+
+        assert len(received) == 2
+        speakers = [s.speaker for s in received]
+        assert "Me" in speakers
+        assert "Them" in speakers
+
+    @pytest.mark.asyncio
+    async def test_concurrent_streams_do_not_mix_buffers(self):
+        """Interleaved mic/monitor chunks each fill only their own buffer."""
+        from backend.audio.pipeline import AudioPipeline, _MIN_CHUNK_SAMPLES
+        from backend.audio.transcriber import TranscriptionResult
+
+        config = self._make_config()
+        pipeline = AudioPipeline(config)
+        pipeline._vad.is_speech = MagicMock(return_value=True)
+
+        transcribed_labels: list[str] = []
+
+        # Capture which speaker_label was active when transcribe() was called
+        original_process = pipeline._process_buffer
+
+        async def tracking_process(force=False, speaker_label="Speaker"):
+            transcribed_labels.append(speaker_label)
+            await original_process(force=force, speaker_label=speaker_label)
+
+        pipeline._process_buffer = tracking_process
+        pipeline._transcriber.transcribe = MagicMock(return_value=[
+            TranscriptionResult(text="x", start=0.0, end=1.0, language="pt")
+        ])
+
+        received = []
+
+        async def callback(seg):
+            received.append(seg)
+
+        pipeline.on_segment(callback)
+
+        # Interleave: mic, monitor, mic, monitor — each just above half threshold
+        half = _MIN_CHUNK_SAMPLES // 2 + 10
+        for _ in range(2):
+            await pipeline.process_audio_chunk(
+                np.zeros(half, dtype=np.int16).tobytes(), speaker_label="Me"
+            )
+            await pipeline.process_audio_chunk(
+                np.zeros(half, dtype=np.int16).tobytes(), speaker_label="Them"
+            )
+
+        # Every transcription must have a definite label — no label pollution
+        for label in transcribed_labels:
+            assert label in ("Me", "Them")
+
+        # All emitted segments must have the correct label too
+        for seg in received:
+            assert seg.speaker in ("Me", "Them")
+
+    @pytest.mark.asyncio
+    async def test_reset_flushes_all_speaker_buffers(self):
+        """reset() flushes pending audio for every registered speaker."""
+        from backend.audio.pipeline import AudioPipeline
+        from backend.audio.transcriber import TranscriptionResult
+
+        config = self._make_config()
+        pipeline = AudioPipeline(config)
+        pipeline._vad.is_speech = MagicMock(return_value=True)
+        pipeline._transcriber.transcribe = MagicMock(return_value=[
+            TranscriptionResult(text="flushed", start=0.0, end=0.5, language="pt")
+        ])
+
+        received = []
+
+        async def callback(seg):
+            received.append(seg)
+
+        pipeline.on_segment(callback)
+
+        # Feed below-threshold chunks into both streams so nothing transcribes yet
+        tiny = np.zeros(100, dtype=np.int16)
+        await pipeline.process_audio_chunk(tiny.tobytes(), speaker_label="Me")
+        await pipeline.process_audio_chunk(tiny.tobytes(), speaker_label="Them")
+
+        assert len(received) == 0  # nothing transcribed yet
+
+        await pipeline.reset()
+
+        # Both buffers should have been flushed → two transcription calls
+        assert pipeline._buffers == {}
+        assert pipeline._meeting_start is None
+        assert len(received) == 2
+        speakers = {s.speaker for s in received}
+        assert speakers == {"Me", "Them"}
 
 
 # ---------------------------------------------------------------------------
